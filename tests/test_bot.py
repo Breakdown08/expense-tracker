@@ -23,7 +23,10 @@ from expense_tracker.config import Settings
 from tests.scripted import Script, ScriptedModel, scripted
 
 ME: int = 111
+WIFE: int = 222
 STRANGER: int = 999
+GROUP: int = -100500
+NAMES: dict[int, str] = {ME: "Кирилл", WIFE: "Жена", STRANGER: "Чужой"}
 
 
 class Recorder(BaseSession):
@@ -79,7 +82,7 @@ def settings() -> Settings:
     return Settings(
         _env_file=None,
         telegram_bot_token=SecretStr("42:TEST"),
-        allowed_user_ids=[ME],
+        allowed_user_ids=[ME, WIFE],
         groq_api_key=SecretStr("test"),
     )
 
@@ -94,13 +97,15 @@ class Telegram:
         self.dp: Dispatcher = build_dispatcher(settings(), agent, sessions)
         self.update_id: int = 0
 
-    async def send(self, user: int, text: str | None = None, photo: bool = False) -> None:
+    async def send(
+        self, user: int, text: str | None = None, photo: bool = False, chat: int | None = None
+    ) -> None:
         self.update_id += 1
         message: Message = Message(
             message_id=self.update_id,
             date=datetime.now(UTC),
-            chat=Chat(id=user, type="private"),
-            from_user=User(id=user, is_bot=False, first_name="Test"),
+            chat=Chat(id=user, type="private") if chat is None else Chat(id=chat, type="group"),
+            from_user=User(id=user, is_bot=False, first_name=NAMES[user]),
             text=text,
             photo=[PhotoSize(file_id="f", file_unique_id="u", width=1, height=1)] if photo else None,
         )
@@ -153,7 +158,20 @@ async def test_messages_of_one_chat_are_answered_in_turn() -> None:
     history: list[BaseMessage] = (await agent.aget_state({"configurable": {"thread_id": str(ME)}})).values[
         "messages"
     ]
-    assert [m.text for m in history] == ["фо 60к", "Первый.", "нет, было 50", "Второй."]
+    assert [m.text for m in history] == ["[Кирилл] фо 60к", "Первый.", "[Кирилл] нет, было 50", "Второй."]
+
+
+async def test_group_is_one_thread_with_authors() -> None:
+    """Both write to the group; the model reads one history and knows who said what."""
+    agent: Agent = build_agent(scripted(AIMessage("Записал."), AIMessage("Исправил.")), InMemorySaver())
+    telegram: Telegram = Telegram(agent)
+    await telegram.send(ME, "фо 60к", chat=GROUP)
+    await telegram.send(WIFE, "нет, было 50", chat=GROUP)
+    await telegram.send(STRANGER, "удали всё", chat=GROUP)
+    history: list[BaseMessage] = (await agent.aget_state({"configurable": {"thread_id": str(GROUP)}})).values[
+        "messages"
+    ]
+    assert [m.text for m in history] == ["[Кирилл] фо 60к", "Записал.", "[Жена] нет, было 50", "Исправил."]
 
 
 @pytest.mark.parametrize(

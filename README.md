@@ -32,6 +32,11 @@ Required: `TELEGRAM_BOT_TOKEN`, `ALLOWED_USER_IDS`, `LLM_MODEL` and its provider
 model is `openai/gpt-oss-120b` on Groq's free tier, so it runs without a card; switch to Claude by
 changing `LLM_MODEL`. A missing key stops the bot at start with the variable named.
 
+The bot works in a private chat or in a group shared by the family: there everyone sees every
+record, and the agent keeps one history for the group, each message tagged with its author. For a
+group, turn privacy mode off in @BotFather (`/setprivacy` → Disable) *before* adding the bot,
+otherwise it sees only commands; afterwards `/setjoingroups` → Disable keeps it out of other groups.
+
 ## Develop
 
 Python 3.14, [uv](https://docs.astral.sh/uv/).

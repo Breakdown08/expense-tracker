@@ -29,6 +29,12 @@ GREETING: str = """Пиши траты как в тетрадку: «фо 60к»
 FAILED: str = "Модель не ответила. Попробуй позже; что успело записаться — спроси «что записано сегодня»."
 
 
+def signed(message: Message) -> str:
+    """The group is one memory thread for two: the model needs to know who said what."""
+    assert message.from_user is not None and message.text is not None
+    return f"[{message.from_user.first_name}] {message.text}"
+
+
 def chunks(text: str, size: int = TELEGRAM_LIMIT) -> list[str]:
     """Split at line breaks so that a month's list arrives whole; a single overlong line is cut."""
     parts: list[str] = []
@@ -75,7 +81,7 @@ def build_dispatcher(
             today: date = datetime.now(zone).date()
             context: Context = Context(user_id=message.from_user.id, sessions=sessions, today=today)
             try:
-                answer = await reply(agent, message.chat.id, message.text, context)
+                answer = await reply(agent, message.chat.id, signed(message), context)
             except Exception:
                 log.exception("agent failed")
                 answer = FAILED
