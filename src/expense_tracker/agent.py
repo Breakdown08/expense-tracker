@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, override
 
 import anthropic
 import groq
@@ -19,12 +19,15 @@ from langchain.agents.middleware import (
     SummarizationMiddleware,
     ToolCallLimitMiddleware,
     dynamic_prompt,
+    hook_config,
 )
+from langchain.agents.middleware.model_call_limit import ModelCallLimitState
 from langchain.tools import ToolRuntime, tool
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.runtime import Runtime
 from langgraph.types import Checkpointer
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -150,6 +153,26 @@ TRANSIENT: tuple[type[Exception], ...] = (
     anthropic.InternalServerError,
 )
 
+LIMIT_REACHED: str = (
+    "Не справился за разумное число шагов и остановился. "
+    "Что успело записаться — спроси «что записано сегодня»."
+)
+
+
+class CallLimit(ModelCallLimitMiddleware[Any, Context]):
+    """LangChain's limit, with the reason in the family's language instead of «Model call limits exceeded»."""
+
+    @hook_config(can_jump_to=["end"])
+    @override
+    def before_model(
+        self, state: ModelCallLimitState[Any], runtime: Runtime[Context]
+    ) -> dict[str, Any] | None:
+        update: dict[str, Any] | None = super().before_model(state, runtime)
+        if update is not None:
+            update["messages"] = [AIMessage(LIMIT_REACHED)]
+        return update
+
+
 # As create_agent declares its result. ty 0.0.95 does not see that a TypedDict class has
 # __optional_keys__ and rejects the bound; mypy and the runtime agree it is there.
 type Agent = CompiledStateGraph[AgentState[None], Context, InputAgentState, OutputAgentState[None]]  # ty: ignore[invalid-type-arguments]
@@ -163,7 +186,7 @@ def build_agent(model: BaseChatModel, checkpointer: Checkpointer = None, retry_d
         # Old turns fold into a summary: every model call re-sends the whole history.
         SummarizationMiddleware(model, trigger=("tokens", 3000), keep=("messages", 12)),
         ModelRetryMiddleware(retry_on=TRANSIENT, max_retries=3, initial_delay=retry_delay, max_delay=30.0),
-        ModelCallLimitMiddleware(run_limit=6),  # one message never loops for long
+        CallLimit(run_limit=6),  # one message never loops for long
         ToolCallLimitMiddleware(run_limit=8),
     ]
     return create_agent(model, TOOLS, middleware=chain, context_schema=Context, checkpointer=checkpointer)
