@@ -2,7 +2,7 @@
 
 A name bound by assignment, for, with or := must be declared with a type in its scope, before or
 at the binding; so must self.<attr>. Exempt: comprehension variables and `except ... as` names,
-which Python gives no place to annotate.
+which Python gives no place to annotate, and enum members, which the typing spec forbids annotating.
 """
 
 import ast
@@ -29,6 +29,12 @@ def targets(node: ast.expr) -> list[ast.expr]:
     if isinstance(node, ast.Starred):
         return targets(node.value)
     return [node]
+
+
+def is_enum(scope: Scope) -> bool:
+    return isinstance(scope, ast.ClassDef) and any(
+        isinstance(b, ast.Name) and b.id.endswith("Enum") for b in scope.bases
+    )
 
 
 def key(node: ast.expr) -> str | None:
@@ -68,6 +74,8 @@ def violations(path: Path, root: Path = ROOT) -> list[str]:
     ]
     scope: Scope
     for scope in scopes:
+        if is_enum(scope):
+            continue
         nodes: list[ast.AST] = own_nodes(scope)
         declared: dict[str, int] = {}
         node: ast.AST
@@ -111,6 +119,7 @@ def test_checker_catches_untyped(tmp_path: Path) -> None:
     src.write_text(
         "a = 1\nb: int = 2\nfor i in []:\n    pass\nx, y = 1, 2\nz: int\nw: int\nz, w = 1, 2\n"
         "q = [n for n in [1] if (m := n)]\n"
+        "class E(StrEnum):\n    A = 'a'\n"
     )
     lines: list[str] = [v.split(": ", 1)[1] for v in violations(src, tmp_path)]
     assert lines == [

@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 # Provider prefix of LLM_MODEL (`init_chat_model("provider:model")`) -> the key it needs.
 PROVIDER_KEYS: dict[str, str] = {"groq": "GROQ_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
+DEFAULT_DATABASE_URL: str = "postgresql://tracker:tracker@localhost:5432/tracker"
 
 
 class Settings(BaseSettings):
@@ -19,7 +20,7 @@ class Settings(BaseSettings):
     llm_model: str = "groq:openai/gpt-oss-120b"
     groq_api_key: SecretStr | None = None
     anthropic_api_key: SecretStr | None = None
-    database_url: str = "postgresql://tracker:tracker@localhost:5432/tracker"
+    database_url: str = DEFAULT_DATABASE_URL
 
     # Publishing: each platform is on when its keys are set; otherwise the bot sends the text to post by hand.
     threads_access_token: SecretStr | None = None

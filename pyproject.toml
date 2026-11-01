@@ -6,8 +6,10 @@ readme = "README.md"
 requires-python = ">=3.14,<3.15"
 dependencies = [
     "aiogram>=3.31.0",
+    "alembic>=1.20.1",
     "psycopg[binary]>=3.3.6",
     "pydantic-settings>=2.16.2",
+    "sqlalchemy[asyncio]>=2.1.6",
 ]
 
 [project.scripts]
@@ -28,6 +30,7 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.ruff]
 line-length = 110
@@ -47,3 +50,10 @@ files = ["src", "tests"]
 init_typed = true
 init_forbid_extra = true
 warn_required_dynamic_aliases = true
+
+
+# CLI only (`uv run alembic revision --autogenerate -m ...`); the bot upgrades itself at start.
+# The URL comes from DATABASE_URL, see migrations/env.py.
+[tool.alembic]
+script_location = "%(here)s/src/expense_tracker/migrations"
+file_template = "%%(year)d%%(month).2d%%(day).2d_%%(rev)s_%%(slug)s"

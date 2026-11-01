@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from expense_tracker.bot import run
 from expense_tracker.config import Settings, explain
+from expense_tracker.db import upgrade
 
 
 def main() -> None:
@@ -17,6 +18,7 @@ def main() -> None:
         settings = Settings()
     except ValidationError as error:
         sys.exit(explain(error))
+    upgrade(settings.database_url)  # before the bot answers anyone: the schema is current
     asyncio.run(run(settings))
 
 

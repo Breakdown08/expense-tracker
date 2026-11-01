@@ -5,8 +5,8 @@ A family expense tracker in Telegram. Write to the bot the way you would jot it 
 it drafts a post about how the family lives and publishes it to Threads and a Telegram channel after
 your approval.
 
-> **Status:** skeleton. Settings, the bot on long polling with a user whitelist, Postgres, CI.
-> The agent, database schema and posting flow are next.
+> **Status:** settings, the bot on long polling with a user whitelist, the expenses database
+> (SQLAlchemy, Alembic, explicit SQL for the summary), CI. The agent and posting flow are next.
 
 ## Design
 
@@ -40,6 +40,15 @@ DATABASE_URL=postgresql://tracker:tracker@localhost:5432/tracker uv run pytest
 uv run ruff check && uv run ruff format --check && uv run mypy
 ```
 
-Database tests skip without `DATABASE_URL`; CI runs them against a Postgres service. Every
+Database tests skip without `DATABASE_URL`; CI runs them against a Postgres service. They create
+their own `<name>_test` database next to it, so your data stays untouched.
+
+The bot applies migrations at start. After changing `models.py`:
+
+```sh
+uv run alembic revision --autogenerate -m "what changed"
+```
+
+`tests/test_migrations.py` fails if a model changed without a revision. Every
 variable, parameter and return value is typed: `mypy --strict` checks signatures,
 `tests/test_annotations.py` checks the rest.
