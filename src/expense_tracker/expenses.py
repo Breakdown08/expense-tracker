@@ -16,7 +16,8 @@ class Category(StrEnum):
     GROCERIES = "groceries"
     EATING_OUT = "eating_out"
     TRANSPORT = "transport"
-    HOUSING = "housing"  # rent, utilities, internet
+    HOUSING = "housing"  # rent, utilities
+    SUBSCRIPTIONS = "subscriptions"  # internet, phone plan, streaming, apps
     HOUSEHOLD = "household"
     HEALTH = "health"
     CLOTHES = "clothes"

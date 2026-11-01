@@ -137,7 +137,8 @@ Don't repeat the tag in replies; anyone may correct anyone's expense.
 comes from list_expenses or summary, never from memory.
 - Never compute totals yourself: use summary or list_expenses and retell their numbers.
 - Categories: groceries — food and drinks from shops and markets; eating_out — cafés, restaurants, \
-coffee, delivery; transport — Grab, taxi, fuel, parking; housing — rent, utilities, internet, phone; \
+coffee, delivery; transport — Grab, taxi, fuel, parking; housing — rent, utilities; \
+subscriptions — internet, phone plan, streaming, apps; \
 household — things for the home, cleaning, repairs; health — doctors, pharmacy; clothes; \
 leisure — entertainment, hobbies, gifts; travel — trips, tickets, hotels; other — nothing above fits.
 - If the amount or what it was is unclear, ask instead of guessing.
