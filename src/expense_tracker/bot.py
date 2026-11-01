@@ -3,12 +3,14 @@
 import asyncio
 import logging
 from collections import defaultdict
+from collections.abc import Awaitable, Callable
 from datetime import date, datetime
+from typing import Any, override
 from zoneinfo import ZoneInfo
 
-from aiogram import Bot, Dispatcher, F
+from aiogram import BaseMiddleware, Bot, Dispatcher, F
 from aiogram.filters import CommandStart
-from aiogram.types import Message
+from aiogram.types import Chat, Message, TelegramObject
 from aiogram.utils.chat_action import ChatActionSender
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
@@ -57,17 +59,39 @@ def chunks(text: str, size: int = TELEGRAM_LIMIT) -> list[str]:
     return parts or ["…"]
 
 
+class InTurn(BaseMiddleware):
+    """A chat's updates are handled one at a time, in the order they came.
+
+    Two quick messages would otherwise run the agent on one memory thread at once, and the
+    second turn vanished from the history. The lock is taken before the filters: aiogram runs
+    sync filters in threads, so by the handler two messages may already be out of order.
+    """
+
+    def __init__(self) -> None:
+        self.locks: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
+
+    @override
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: dict[str, Any],
+    ) -> Any:
+        chat: Chat | None = data.get("event_chat")
+        if chat is None:
+            return await handler(event, data)
+        async with self.locks[chat.id]:
+            return await handler(event, data)
+
+
 def build_dispatcher(
     settings: Settings, agent: Agent, sessions: async_sessionmaker[AsyncSession]
 ) -> Dispatcher:
     dp: Dispatcher = Dispatcher()
+    dp.update.outer_middleware(InTurn())  # after aiogram's own, which sets event_chat
     # Messages from anyone outside the whitelist are dropped without a reply.
     dp.message.filter(F.from_user.id.in_(settings.allowed_user_ids))
     zone: ZoneInfo = ZoneInfo(settings.timezone)
-
-    # Two quick messages in one chat would run the agent on the same thread at once, and the second
-    # might not see the #id the first just recorded: a chat's messages are answered in turn.
-    turns: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     @dp.message(CommandStart())
     async def on_start(message: Message) -> None:
@@ -77,7 +101,7 @@ def build_dispatcher(
     async def on_text(message: Message, bot: Bot) -> None:
         assert message.from_user is not None and message.text is not None  # the filters above
         answer: str
-        async with turns[message.chat.id], ChatActionSender.typing(message.chat.id, bot):
+        async with ChatActionSender.typing(message.chat.id, bot):
             today: date = datetime.now(zone).date()
             context: Context = Context(user_id=message.from_user.id, sessions=sessions, today=today)
             try:
