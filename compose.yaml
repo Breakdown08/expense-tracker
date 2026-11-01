@@ -1,0 +1,31 @@
+# `docker compose up -d`: the bot and Postgres come back by themselves after the laptop reboots.
+services:
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tracker
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tracker}
+      POSTGRES_DB: tracker
+    volumes:
+      - pgdata:/var/lib/postgresql  # Postgres 18 images keep data in a versioned subdirectory here
+    ports:
+      - 127.0.0.1:${POSTGRES_PORT:-5432}:5432  # for tests and psql on the host only
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U tracker -d tracker]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://tracker:${POSTGRES_PASSWORD:-tracker}@db:5432/tracker
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
