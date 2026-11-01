@@ -73,3 +73,16 @@ def test_unknown_provider(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_empty_whitelist_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     text: str = error_text(monkeypatch, TELEGRAM_BOT_TOKEN="t", ALLOWED_USER_IDS=" , ", GROQ_API_KEY="k")
     assert "ALLOWED_USER_IDS" in text
+
+
+def test_api_key_of_the_chosen_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings: Settings = load(
+        monkeypatch,
+        TELEGRAM_BOT_TOKEN="t",
+        ALLOWED_USER_IDS="1",
+        GROQ_API_KEY="groq-key",
+        ANTHROPIC_API_KEY="anthropic-key",
+        LLM_MODEL="anthropic:claude-haiku-5-5",
+    )
+    assert settings.llm_api_key.get_secret_value() == "anthropic-key"
+    assert settings.timezone == "Asia/Ho_Chi_Minh"

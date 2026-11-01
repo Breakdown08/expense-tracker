@@ -5,15 +5,18 @@ A family expense tracker in Telegram. Write to the bot the way you would jot it 
 it drafts a post about how the family lives and publishes it to Threads and a Telegram channel after
 your approval.
 
-> **Status:** settings, the bot on long polling with a user whitelist, the expenses database
-> (SQLAlchemy, Alembic, explicit SQL for the summary), CI. The agent and posting flow are next.
+> **Status:** the bot records, corrects and summarises expenses through the agent; memory per chat
+> in Postgres. The posting flow and the model eval are next.
 
 ## Design
 
 - **Runs on a laptop at home.** Long polling needs no public IP, domain or VPS; if the laptop sleeps,
   Telegram keeps messages for a day. `docker compose` restarts everything after a reboot.
-- **Expense agent** — LangChain `create_agent` with tools; the numbers come from SQL in the tools,
-  the model only retells them.
+- **Expense agent** — LangChain `create_agent` with tools over `expenses.py`; the numbers come
+  from SQL in the tools, the model only retells them. Middleware instead of hand-written loops:
+  history folds into a summary past 3K tokens (Groq's free tier allows 8K a minute), rate limits
+  and provider 5xx are retried while a wrong key is not, and one message is capped at 6 model
+  calls. The chat id is the LangGraph thread, kept by the Postgres checkpointer across restarts.
 - **Posting flow** — its own LangGraph `StateGraph`: figures → draft → pause for approval (hours,
   surviving a restart) → edit loop → publish to each platform, retrying only the one that failed.
 - **PostgreSQL** for expenses and LangGraph checkpoints alike.
@@ -49,6 +52,9 @@ The bot applies migrations at start. After changing `models.py`:
 uv run alembic revision --autogenerate -m "what changed"
 ```
 
-`tests/test_migrations.py` fails if a model changed without a revision. Every
+`tests/test_migrations.py` fails if a model changed without a revision.
+
+Agent tests run on a scripted model: they check tools, memory, limits and retries, not how well a
+real model understands «фо 60к» — that is the eval's job. Every
 variable, parameter and return value is typed: `mypy --strict` checks signatures,
 `tests/test_annotations.py` checks the rest.

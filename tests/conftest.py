@@ -9,7 +9,13 @@ from urllib.parse import SplitResult, urlsplit
 
 import psycopg
 import pytest
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession, AsyncTransaction
+from sqlalchemy.ext.asyncio import (
+    AsyncConnection,
+    AsyncEngine,
+    AsyncSession,
+    AsyncTransaction,
+    async_sessionmaker,
+)
 
 from expense_tracker.db import make_engine, upgrade
 
@@ -35,16 +41,27 @@ def test_db_url() -> Iterator[str]:
 
 
 @pytest.fixture
-async def session(test_db_url: str) -> AsyncIterator[AsyncSession]:
-    """Commits inside the code under test become savepoints; everything rolls back after the test."""
+async def connection(test_db_url: str) -> AsyncIterator[AsyncConnection]:
+    """One outer transaction per test, rolled back afterwards."""
     engine: AsyncEngine = make_engine(test_db_url)
     conn: AsyncConnection
     async with engine.connect() as conn:
         outer: AsyncTransaction = await conn.begin()
-        db: AsyncSession = AsyncSession(
-            bind=conn, join_transaction_mode="create_savepoint", expire_on_commit=False
-        )
-        yield db
-        await db.close()
+        yield conn
         await outer.rollback()
     await engine.dispose()
+
+
+@pytest.fixture
+def sessions(connection: AsyncConnection) -> async_sessionmaker[AsyncSession]:
+    """Commits inside the code under test become savepoints of the outer transaction."""
+    return async_sessionmaker(
+        bind=connection, join_transaction_mode="create_savepoint", expire_on_commit=False
+    )
+
+
+@pytest.fixture
+async def session(sessions: async_sessionmaker[AsyncSession]) -> AsyncIterator[AsyncSession]:
+    db: AsyncSession
+    async with sessions() as db:
+        yield db

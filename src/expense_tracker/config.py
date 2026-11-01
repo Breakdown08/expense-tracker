@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     groq_api_key: SecretStr | None = None
     anthropic_api_key: SecretStr | None = None
     database_url: str = DEFAULT_DATABASE_URL
+    # «Today» for an expense without a date is the family's day, not the laptop's or UTC.
+    timezone: str = "Asia/Ho_Chi_Minh"
 
     # Publishing: each platform is on when its keys are set; otherwise the bot sends the text to post by hand.
     threads_access_token: SecretStr | None = None
@@ -45,6 +47,12 @@ class Settings(BaseSettings):
         if getattr(self, key.lower()) is None:
             raise ValueError(f"{key} is required for LLM_MODEL={self.llm_model}")
         return self
+
+    @property
+    def llm_api_key(self) -> SecretStr:
+        key: SecretStr | None = getattr(self, PROVIDER_KEYS[self.llm_model.split(":", 1)[0]].lower())
+        assert key is not None  # provider_key_present
+        return key
 
     @property
     def threads_enabled(self) -> bool:
