@@ -16,7 +16,6 @@ from langchain.agents.middleware import (
     ModelRequest,
     ModelRetryMiddleware,
     OutputAgentState,
-    SummarizationMiddleware,
     ToolCallLimitMiddleware,
     dynamic_prompt,
     hook_config,
@@ -134,6 +133,8 @@ Don't repeat the tag in replies; anyone may correct anyone's expense.
 - Messages are short: «фо 60к», «grab 45k, кофе 35к». «к»/«k» means thousand, «млн»/«tr» million.
 - Record everything from one message with a single add_expenses call.
 - «нет, было 50» corrects the expense just recorded: use its #id from the tool result.
+- The chat history holds only today's messages. Anything earlier — yesterday, last month — \
+comes from list_expenses or summary, never from memory.
 - Never compute totals yourself: use summary or list_expenses and retell their numbers.
 - If the amount or what it was is unclear, ask instead of guessing.
 - Reply briefly in the user's language. Amounts with spaces between thousands: 60 000 VND."""
@@ -185,8 +186,6 @@ def build_agent(model: BaseChatModel, checkpointer: Checkpointer = None, retry_d
     # its own state type) do not fit create_agent's list under mypy without widening it here.
     chain: list[AgentMiddleware[Any, Context]] = [
         system_prompt,
-        # Old turns fold into a summary: every model call re-sends the whole history.
-        SummarizationMiddleware(model, trigger=("tokens", 3000), keep=("messages", 12)),
         ModelRetryMiddleware(retry_on=TRANSIENT, max_retries=3, initial_delay=retry_delay, max_delay=30.0),
         CallLimit(run_limit=6),  # one message never loops for long
         ToolCallLimitMiddleware(run_limit=8),
@@ -194,11 +193,17 @@ def build_agent(model: BaseChatModel, checkpointer: Checkpointer = None, retry_d
     return create_agent(model, TOOLS, middleware=chain, context_schema=Context, checkpointer=checkpointer)
 
 
+def thread(chat_id: int, day: date) -> str:
+    """A chat's memory lasts one day: corrections refer to what was just written, and earlier
+    expenses are in the database. A year of use costs no more tokens than its first day."""
+    return f"{chat_id}:{day.isoformat()}"
+
+
 async def reply(agent: Agent, chat_id: int, text: str, context: Context) -> str:
-    """One user message in, the agent's last answer out. The chat is the memory thread."""
+    """One user message in, the agent's last answer out, in today's thread of the chat."""
     result: dict[str, object] = await agent.ainvoke(
         {"messages": [HumanMessage(text)]},
-        config={"configurable": {"thread_id": str(chat_id)}},
+        config={"configurable": {"thread_id": thread(chat_id, context.today)}},
         context=context,
     )
     messages: object = result["messages"]

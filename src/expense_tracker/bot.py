@@ -121,8 +121,9 @@ def build_dispatcher(
 
 
 async def run(settings: Settings) -> None:
+    # No temperature: recent Claude models reject the parameter, and gpt-oss is meant to run at its default.
     model: BaseChatModel = init_chat_model(
-        settings.llm_model, api_key=settings.llm_api_key.get_secret_value(), temperature=0
+        settings.llm_model, api_key=settings.llm_api_key.get_secret_value()
     )
     engine: AsyncEngine = make_engine(settings.database_url)
     saver: AsyncPostgresSaver

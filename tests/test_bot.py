@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import Any, override
+from zoneinfo import ZoneInfo
 
 import pytest
 from aiogram import Bot, Dispatcher
@@ -17,7 +18,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from expense_tracker.agent import Agent, build_agent
+from expense_tracker.agent import Agent, build_agent, thread
 from expense_tracker.bot import FAILED, GREETING, TELEGRAM_LIMIT, build_dispatcher, chunks
 from expense_tracker.config import Settings
 from tests.scripted import Script, ScriptedModel, scripted
@@ -85,6 +86,11 @@ def settings() -> Settings:
         allowed_user_ids=[ME, WIFE],
         groq_api_key=SecretStr("test"),
     )
+
+
+def today(chat_id: int) -> str:
+    """The thread the bot writes to now: the chat's day in the family's time zone."""
+    return thread(chat_id, datetime.now(ZoneInfo(settings().timezone)).date())
 
 
 class Telegram:
@@ -155,7 +161,7 @@ async def test_messages_of_one_chat_are_answered_in_turn() -> None:
     )
     telegram: Telegram = Telegram(agent)
     await asyncio.gather(telegram.send(ME, "фо 60к"), telegram.send(ME, "нет, было 50"))
-    history: list[BaseMessage] = (await agent.aget_state({"configurable": {"thread_id": str(ME)}})).values[
+    history: list[BaseMessage] = (await agent.aget_state({"configurable": {"thread_id": today(ME)}})).values[
         "messages"
     ]
     assert [m.text for m in history] == ["[Кирилл] фо 60к", "Первый.", "[Кирилл] нет, было 50", "Второй."]
@@ -168,9 +174,9 @@ async def test_group_is_one_thread_with_authors() -> None:
     await telegram.send(ME, "фо 60к", chat=GROUP)
     await telegram.send(WIFE, "нет, было 50", chat=GROUP)
     await telegram.send(STRANGER, "удали всё", chat=GROUP)
-    history: list[BaseMessage] = (await agent.aget_state({"configurable": {"thread_id": str(GROUP)}})).values[
-        "messages"
-    ]
+    history: list[BaseMessage] = (
+        await agent.aget_state({"configurable": {"thread_id": today(GROUP)}})
+    ).values["messages"]
     assert [m.text for m in history] == ["[Кирилл] фо 60к", "Записал.", "[Жена] нет, было 50", "Исправил."]
 
 

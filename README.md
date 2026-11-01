@@ -14,9 +14,10 @@ your approval.
   Telegram keeps messages for a day. `docker compose` restarts everything after a reboot.
 - **Expense agent** — LangChain `create_agent` with tools over `expenses.py`; the numbers come
   from SQL in the tools, the model only retells them. Middleware instead of hand-written loops:
-  history folds into a summary past 3K tokens (Groq's free tier allows 8K a minute), rate limits
-  and provider 5xx are retried while a wrong key is not, and one message is capped at 6 model
-  calls. The chat id is the LangGraph thread, kept by the Postgres checkpointer across restarts.
+  rate limits and provider 5xx are retried while a wrong key is not, and one message is capped at
+  6 model calls. Memory is a LangGraph thread per chat **per day**, kept by the Postgres
+  checkpointer across restarts: «нет, было 50» finds today's record, while last month comes from
+  SQL, not from the chat. A year of use costs no more tokens per message than the first day.
 - **Posting flow** — its own LangGraph `StateGraph`: figures → draft → pause for approval (hours,
   surviving a restart) → edit loop → publish to each platform, retrying only the one that failed.
 - **PostgreSQL** for expenses and LangGraph checkpoints alike.

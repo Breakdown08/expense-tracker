@@ -1,6 +1,6 @@
 """The agent with a scripted model: tools, memory and limits are ours to test; the model's wits are eval's."""
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import groq
@@ -11,7 +11,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from expense_tracker.agent import LIMIT_REACHED, Agent, Context, build_agent, reply
+from expense_tracker.agent import LIMIT_REACHED, Agent, Context, build_agent, reply, thread
 from expense_tracker.expenses import Period, list_expenses
 from expense_tracker.models import Expense
 from tests.conftest import requires_db
@@ -86,9 +86,9 @@ async def test_correction_uses_memory_of_the_chat(sessions: async_sessionmaker[A
     )
     await reply(agent, CHAT, "нет, было 50", context(sessions))
     assert [r.amount for r in await recorded(sessions)] == [Decimal(50000)]
-    history: list[BaseMessage] = (await agent.aget_state({"configurable": {"thread_id": str(CHAT)}})).values[
-        "messages"
-    ]
+    history: list[BaseMessage] = (
+        await agent.aget_state({"configurable": {"thread_id": thread(CHAT, TODAY)}})
+    ).values["messages"]
     assert f"#{row.id}" in str(history[2].content)  # the tool result the model read the id from
 
 
@@ -147,6 +147,26 @@ async def test_memory_survives_restart(test_db_url: str, sessions: async_session
         restarted: Agent = build_agent(scripted(AIMessage("Помню.")), saver)
         await reply(restarted, CHAT, "помнишь?", context(sessions))
         history: list[BaseMessage] = (
-            await restarted.aget_state({"configurable": {"thread_id": str(CHAT)}})
+            await restarted.aget_state({"configurable": {"thread_id": thread(CHAT, TODAY)}})
         ).values["messages"]
     assert [m.text for m in history] == ["привет", "Привет.", "помнишь?", "Помню."]
+
+
+async def test_a_new_day_starts_a_new_history(sessions: async_sessionmaker[AsyncSession]) -> None:
+    """Yesterday's chat is not re-sent to the model; yesterday's expenses are still in the database."""
+    model: ScriptedModel = scripted(
+        call("add_expenses", {"items": [{"amount": 60000, "category": "eating_out", "note": "фо"}]}),
+        AIMessage("Записал."),
+    )
+    agent: Agent = build_agent(model, InMemorySaver())
+    await reply(agent, CHAT, "фо 60к", context(sessions))
+    tomorrow: Context = Context(user_id=ME, sessions=sessions, today=TODAY + timedelta(days=1))
+    model.messages = Script(
+        [call("list_expenses", {"start": "2026-11-02", "end": "2026-11-02"}), AIMessage("Фо.")]
+    )
+    await reply(agent, CHAT, "что было вчера?", tomorrow)
+    history: list[BaseMessage] = (
+        await agent.aget_state({"configurable": {"thread_id": thread(CHAT, tomorrow.today)}})
+    ).values["messages"]
+    assert [m.text for m in history][0] == "что было вчера?"  # nothing of yesterday's turn
+    assert "фо" in str(history[2].content)  # the answer came from the database
