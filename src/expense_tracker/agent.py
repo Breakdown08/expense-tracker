@@ -150,7 +150,9 @@ TRANSIENT: tuple[type[Exception], ...] = (
     anthropic.InternalServerError,
 )
 
-type Agent = CompiledStateGraph[AgentState[None], Context, InputAgentState, OutputAgentState[None]]
+# As create_agent declares its result. ty 0.0.95 does not see that a TypedDict class has
+# __optional_keys__ and rejects the bound; mypy and the runtime agree it is there.
+type Agent = CompiledStateGraph[AgentState[None], Context, InputAgentState, OutputAgentState[None]]  # ty: ignore[invalid-type-arguments]
 
 
 def build_agent(model: BaseChatModel, checkpointer: Checkpointer = None, retry_delay: float = 5.0) -> Agent:

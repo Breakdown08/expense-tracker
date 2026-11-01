@@ -9,6 +9,7 @@ from urllib.parse import SplitResult, urlsplit
 
 import psycopg
 import pytest
+from psycopg import sql
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
@@ -32,12 +33,12 @@ def test_db_url() -> Iterator[str]:
     url: str = parts._replace(path=f"/{name}").geturl()
     admin: psycopg.Connection[tuple[object, ...]]
     with psycopg.connect(DATABASE_URL, autocommit=True) as admin:
-        admin.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
-        admin.execute(f'CREATE DATABASE "{name}"')
+        admin.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(name)))
+        admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
     upgrade(url)
     yield url
     with psycopg.connect(DATABASE_URL, autocommit=True) as admin:
-        admin.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+        admin.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(name)))
 
 
 @pytest.fixture
