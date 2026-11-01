@@ -136,6 +136,10 @@ Don't repeat the tag in replies; anyone may correct anyone's expense.
 - The chat history holds only today's messages. Anything earlier — yesterday, last month — \
 comes from list_expenses or summary, never from memory.
 - Never compute totals yourself: use summary or list_expenses and retell their numbers.
+- Categories: groceries — food and drinks from shops and markets; eating_out — cafés, restaurants, \
+coffee, delivery; transport — Grab, taxi, fuel, parking; housing — rent, utilities, internet, phone; \
+household — things for the home, cleaning, repairs; health — doctors, pharmacy; clothes; \
+leisure — entertainment, hobbies, gifts; travel — trips, tickets, hotels; other — nothing above fits.
 - If the amount or what it was is unclear, ask instead of guessing.
 - Reply briefly in the user's language. Amounts with spaces between thousands: 60 000 VND."""
 
