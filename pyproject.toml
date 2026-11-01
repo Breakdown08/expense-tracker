@@ -27,6 +27,7 @@ dev = [
     "pytest>=9.2.0",
     "pytest-asyncio>=1.4.1",
     "ruff>=0.17.3",
+    "ty>=0.0.95",
 ]
 
 [build-system]
@@ -44,8 +45,9 @@ line-length = 110
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "ANN"]
 
-# Every variable, parameter and return value is typed. mypy --strict covers signatures;
-# tests/test_annotations.py covers variables, which no linter checks.
+# Every variable, parameter and return value is typed. ty is the reference checker; mypy --strict
+# stays for its pydantic plugin (constructor arguments). tests/test_annotations.py covers variables,
+# which no checker requires.
 [tool.mypy]
 strict = true
 python_version = "3.14"

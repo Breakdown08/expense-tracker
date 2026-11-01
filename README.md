@@ -40,7 +40,7 @@ Python 3.14, [uv](https://docs.astral.sh/uv/).
 uv sync
 docker compose up -d db
 DATABASE_URL=postgresql://tracker:tracker@localhost:5432/tracker uv run pytest
-uv run ruff check && uv run ruff format --check && uv run mypy
+uv run ruff check && uv run ruff format --check && uv run ty check && uv run mypy
 ```
 
 Database tests skip without `DATABASE_URL`; CI runs them against a Postgres service. They create
@@ -56,5 +56,5 @@ uv run alembic revision --autogenerate -m "what changed"
 
 Agent tests run on a scripted model: they check tools, memory, limits and retries, not how well a
 real model understands «фо 60к» — that is the eval's job. Every
-variable, parameter and return value is typed: `mypy --strict` checks signatures,
-`tests/test_annotations.py` checks the rest.
+variable, parameter and return value is typed: ty and `mypy --strict` check the code,
+`tests/test_annotations.py` checks that variables are annotated.
