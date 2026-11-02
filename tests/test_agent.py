@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from expense_tracker.agent import LIMIT_REACHED, Agent, Context, build_agent, reply, thread
 from expense_tracker.expenses import Period, list_expenses
 from expense_tracker.models import Expense
-from tests.conftest import requires_db
+from tests.conftest import FixedRates, requires_db
 from tests.scripted import Script, ScriptedModel, scripted
 
 pytestmark: pytest.MarkDecorator = requires_db
@@ -31,7 +31,7 @@ def call(name: str, args: dict[str, object], id: str = "c1") -> AIMessage:
 
 
 def context(sessions: async_sessionmaker[AsyncSession]) -> Context:
-    return Context(user_id=ME, sessions=sessions, today=TODAY)
+    return Context(user_id=ME, sessions=sessions, rates=FixedRates(), today=TODAY)
 
 
 async def recorded(sessions: async_sessionmaker[AsyncSession]) -> list[Expense]:
@@ -160,7 +160,9 @@ async def test_a_new_day_starts_a_new_history(sessions: async_sessionmaker[Async
     )
     agent: Agent = build_agent(model, InMemorySaver())
     await reply(agent, CHAT, "фо 60к", context(sessions))
-    tomorrow: Context = Context(user_id=ME, sessions=sessions, today=TODAY + timedelta(days=1))
+    tomorrow: Context = Context(
+        user_id=ME, sessions=sessions, rates=FixedRates(), today=TODAY + timedelta(days=1)
+    )
     model.messages = Script(
         [call("list_expenses", {"start": "2026-11-02", "end": "2026-11-02"}), AIMessage("Фо.")]
     )
@@ -170,3 +172,70 @@ async def test_a_new_day_starts_a_new_history(sessions: async_sessionmaker[Async
     ).values["messages"]
     assert [m.text for m in history][0] == "что было вчера?"  # nothing of yesterday's turn
     assert "фо" in str(history[2].content)  # the answer came from the database
+
+
+async def summary_answer(sessions: async_sessionmaker[AsyncSession], rates: FixedRates) -> str:
+    """What the summary tool told the model about this week, next to the last one."""
+    model: ScriptedModel = scripted(
+        call(
+            "add_expenses",
+            {
+                "items": [
+                    {"amount": 100000, "category": "groceries"},
+                    {"amount": "12.50", "currency": "USD", "category": "travel"},
+                    {"amount": 50000, "category": "groceries", "spent_on": "2026-10-26"},
+                ]
+            },
+        ),
+        AIMessage("Записал."),
+        call("summary", {"start": "2026-11-02", "end": "2026-11-08"}),
+        AIMessage("Вот."),
+    )
+    agent: Agent = build_agent(model, InMemorySaver())
+    ctx: Context = Context(user_id=ME, sessions=sessions, rates=rates, today=TODAY)
+    await reply(agent, CHAT, "продукты 100к, билет 12.5$, продукты 26-го 50к", ctx)
+    await reply(agent, CHAT, "сколько за неделю?", ctx)
+    history: list[BaseMessage] = (
+        await agent.aget_state({"configurable": {"thread_id": thread(CHAT, TODAY)}})
+    ).values["messages"]
+    return str(history[-2].content)
+
+
+async def test_summary_totals_in_vnd_and_rub(sessions: async_sessionmaker[AsyncSession]) -> None:
+    assert (await summary_answer(sessions, FixedRates())).splitlines() == [
+        "travel USD: 12.50 (1), before 0",
+        "groceries VND: 100 000 (1), before 50 000",
+        "Total USD: 12.50, before 0",
+        "Total VND: 100 000, before 50 000",
+        "All in VND: 420 462, before 50 000",
+        "All in RUB: 1 321, before 157",
+        "Rate: Bank of Russia, 31.10.2026: 10 000 VND = 31.42 RUB",
+    ]
+
+
+async def test_summary_without_rates_keeps_the_totals(sessions: async_sessionmaker[AsyncSession]) -> None:
+    lines: list[str] = (await summary_answer(sessions, FixedRates(None))).splitlines()
+    assert lines[-3:] == [
+        "Total USD: 12.50, before 0",
+        "Total VND: 100 000, before 50 000",
+        "No exchange rates now: no total in RUB.",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        ({"amount": 1000000, "currency": "VND"}, "1 000 000 VND = 3 142.23 RUB (Bank of Russia, 31.10.2026)"),
+        ({"amount": 1, "currency": "usd", "to": "vnd"}, "1 USD = 25 636.98 VND (Bank of Russia, 31.10.2026)"),
+        ({"amount": 1, "currency": "XYZ"}, "The Bank of Russia has no rate for XYZ"),
+    ],
+)
+async def test_convert(
+    sessions: async_sessionmaker[AsyncSession], args: dict[str, object], expected: str
+) -> None:
+    agent: Agent = build_agent(scripted(call("convert", args), AIMessage("Вот.")), InMemorySaver())
+    await reply(agent, CHAT, "сколько это в рублях?", context(sessions))
+    history: list[BaseMessage] = (
+        await agent.aget_state({"configurable": {"thread_id": thread(CHAT, TODAY)}})
+    ).values["messages"]
+    assert history[-2].content == expected

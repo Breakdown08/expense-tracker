@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from expense_tracker.agent import Agent, Context, build_agent, reply
 from expense_tracker.config import Settings
 from expense_tracker.db import make_engine, make_sessions
+from expense_tracker.rates import BankOfRussia, RateSource
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -85,7 +86,7 @@ class InTurn(BaseMiddleware):
 
 
 def build_dispatcher(
-    settings: Settings, agent: Agent, sessions: async_sessionmaker[AsyncSession]
+    settings: Settings, agent: Agent, sessions: async_sessionmaker[AsyncSession], rates: RateSource
 ) -> Dispatcher:
     dp: Dispatcher = Dispatcher()
     dp.update.outer_middleware(InTurn())  # after aiogram's own, which sets event_chat
@@ -103,7 +104,9 @@ def build_dispatcher(
         answer: str
         async with ChatActionSender.typing(message.chat.id, bot):
             today: date = datetime.now(zone).date()
-            context: Context = Context(user_id=message.from_user.id, sessions=sessions, today=today)
+            context: Context = Context(
+                user_id=message.from_user.id, sessions=sessions, rates=rates, today=today
+            )
             try:
                 answer = await reply(agent, message.chat.id, signed(message), context)
             except Exception:
@@ -133,6 +136,6 @@ async def run(settings: Settings) -> None:
         log.info("model %s", settings.llm_model)
         bot: Bot = Bot(settings.telegram_bot_token.get_secret_value())
         try:
-            await build_dispatcher(settings, agent, make_sessions(engine)).start_polling(bot)
+            await build_dispatcher(settings, agent, make_sessions(engine), BankOfRussia()).start_polling(bot)
         finally:
             await engine.dispose()

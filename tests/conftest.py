@@ -5,6 +5,8 @@ CI starts Postgres as a service; locally `docker compose up -d db` and set DATAB
 
 import os
 from collections.abc import AsyncIterator, Iterator
+from datetime import date
+from pathlib import Path
 from urllib.parse import SplitResult, urlsplit
 
 import psycopg
@@ -19,6 +21,24 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from expense_tracker.db import make_engine, upgrade
+from expense_tracker.rates import Rates, parse
+
+# XML_daily.asp of 31.10.2026, cut down to VND, USD, EUR and THB; windows-1251 as the Bank sends it.
+CBR_DAILY: bytes = (Path(__file__).parent / "fixtures" / "cbr_daily.xml").read_bytes()
+RATES: Rates = parse(CBR_DAILY)
+
+
+class FixedRates:
+    """The Bank's rates of 31.10.2026, whatever day it is; `None` plays the Bank being down."""
+
+    def __init__(self, rates: Rates | None = RATES) -> None:
+        self.rates: Rates | None = rates
+
+    async def latest(self, today: date) -> Rates:
+        if self.rates is None:
+            raise ConnectionError("Bank of Russia is down")
+        return self.rates
+
 
 DATABASE_URL: str | None = os.environ.get("DATABASE_URL")
 requires_db: pytest.MarkDecorator = pytest.mark.skipif(DATABASE_URL is None, reason="DATABASE_URL is not set")

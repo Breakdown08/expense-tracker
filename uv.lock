@@ -340,6 +340,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiogram" },
     { name = "alembic" },
+    { name = "httpx" },
     { name = "langchain" },
     { name = "langchain-anthropic" },
     { name = "langchain-groq" },
@@ -364,6 +365,7 @@ dev = [
 requires-dist = [
     { name = "aiogram", specifier = ">=3.31.0" },
     { name = "alembic", specifier = ">=1.20.1" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "langchain", specifier = ">=1.4.7" },
     { name = "langchain-anthropic", specifier = ">=1.7.7" },
     { name = "langchain-groq", specifier = ">=1.1.3" },

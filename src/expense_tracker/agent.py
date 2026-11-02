@@ -1,5 +1,6 @@
 """Expense agent: LangChain `create_agent` with tools over `expenses.py`. It knows nothing of posts."""
 
+import logging
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
@@ -34,14 +35,18 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from expense_tracker import expenses
 from expense_tracker.expenses import Category, CategoryTotal, ExpenseChanges, NewExpense, Period
 from expense_tracker.models import Expense
+from expense_tracker.rates import Rates, RateSource, UnknownCurrency
+
+log: logging.Logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
 class Context:
-    """Per message: who writes, where the database is, and what day it is for them."""
+    """Per message: who writes, where the database and the rates are, and what day it is for them."""
 
     user_id: int
     sessions: async_sessionmaker[AsyncSession]
+    rates: RateSource
     today: date
 
 
@@ -53,9 +58,47 @@ class ExpenseInput(BaseModel):
     spent_on: date | None = Field(default=None, description="Omit for today")
 
 
+ONE: Decimal = Decimal(1)  # quantize to whole units: round() would return an int
+
+
+def money(amount: Decimal) -> str:
+    """60 000, 12.50: spaces between thousands, cents only when there are any."""
+    places: str = ",.0f" if amount == amount.to_integral_value() else ",.2f"
+    return format(amount, places).replace(",", " ")
+
+
 def line(row: Expense) -> str:
     note: str = f" «{row.note}»" if row.note else ""
-    return f"#{row.id} {row.spent_on} {row.amount:,.0f} {row.currency} {row.category}{note}".replace(",", " ")
+    return f"#{row.id} {row.spent_on} {money(row.amount)} {row.currency} {row.category}{note}"
+
+
+def grand_total(totals: list[CategoryTotal], rates: Rates | None) -> list[str]:
+    """Every currency's total, then all of them in VND and RUB at the latest rate — counted here, not by
+    the model. Without rates the per-currency totals still stand."""
+    now: dict[str, Decimal] = {}
+    before: dict[str, Decimal] = {}
+    t: CategoryTotal
+    for t in totals:
+        now[t.currency] = now.get(t.currency, Decimal(0)) + t.total
+        before[t.currency] = before.get(t.currency, Decimal(0)) + t.previous_total
+    lines: list[str] = [
+        f"Total {currency}: {money(now[currency])}, before {money(before[currency])}" for currency in now
+    ]
+    if rates is None:
+        return [*lines, "No exchange rates now: no total in RUB."]
+    unknown: list[str] = [currency for currency in now if currency not in rates.rub]
+    known: list[str] = [currency for currency in now if currency in rates.rub]
+    target: str
+    for target in ("VND", "RUB"):
+        sum_now: Decimal = sum((rates.convert(now[c], c, target) for c in known), Decimal(0))
+        sum_before: Decimal = sum((rates.convert(before[c], c, target) for c in known), Decimal(0))
+        whole: tuple[str, str] = (money(sum_now.quantize(ONE)), money(sum_before.quantize(ONE)))
+        lines.append(f"All in {target}: {whole[0]}, before {whole[1]}")
+    vnd: Decimal = rates.convert(Decimal(10000), "VND", "RUB")
+    lines.append(f"Rate: Bank of Russia, {rates.on:%d.%m.%Y}: 10 000 VND = {vnd:.2f} RUB")
+    if unknown:
+        lines.append(f"Left out of «All in», no rate: {', '.join(unknown)}")
+    return lines
 
 
 def period(start: date, end: date) -> Period:
@@ -109,21 +152,44 @@ async def list_expenses(
 @tool
 async def summary(start: date, end: date, runtime: ToolRuntime[Context]) -> str:
     """Totals per category from start to end (both included), next to the same number of days before."""
+    ctx: Context = runtime.context
     session: AsyncSession
-    async with runtime.context.sessions() as session:
+    async with ctx.sessions() as session:
         totals: list[CategoryTotal] = await expenses.summary(session, period(start, end))
+    if not totals:
+        return "No expenses"
+    rates: Rates | None
+    try:
+        rates = await ctx.rates.latest(ctx.today)
+    except Exception:
+        log.warning("no exchange rates for the summary", exc_info=True)
+        rates = None
+    categories: list[str] = [
+        f"{t.category} {t.currency}: {money(t.total)} ({t.count}), before {money(t.previous_total)}"
+        for t in totals
+    ]
+    return "\n".join([*categories, *grand_total(totals, rates)])
+
+
+@tool
+async def convert(amount: Decimal, currency: str, runtime: ToolRuntime[Context], to: str = "RUB") -> str:
+    """Convert an amount between currencies (VND, RUB, USD…) at the Bank of Russia's latest rate."""
+    ctx: Context = runtime.context
+    try:
+        rates: Rates = await ctx.rates.latest(ctx.today)
+        result: Decimal = rates.convert(amount, currency.upper(), to.upper())
+    except UnknownCurrency as error:
+        return f"The Bank of Russia has no rate for {error}"
+    except Exception:
+        log.warning("no exchange rates for convert", exc_info=True)
+        return "Exchange rates are unavailable now"
     return (
-        "\n".join(
-            f"{t.category} {t.currency}: {t.total:,.0f} ({t.count}), before {t.previous_total:,.0f}".replace(
-                ",", " "
-            )
-            for t in totals
-        )
-        or "No expenses"
+        f"{money(amount)} {currency.upper()} = {money(result.quantize(Decimal('0.01')))} {to.upper()} "
+        f"(Bank of Russia, {rates.on:%d.%m.%Y})"
     )
 
 
-TOOLS: list[BaseTool] = [add_expenses, edit_expense, delete_expense, list_expenses, summary]
+TOOLS: list[BaseTool] = [add_expenses, edit_expense, delete_expense, list_expenses, summary, convert]
 
 PROMPT: str = """You keep a family's expense book in Telegram. The family lives in Vietnam and pays in VND \
 unless they name another currency. Today is {today}.
@@ -136,6 +202,9 @@ Don't repeat the tag in replies; anyone may correct anyone's expense.
 - The chat history holds only today's messages. Anything earlier — yesterday, last month — \
 comes from list_expenses or summary, never from memory.
 - Never compute totals yourself: use summary or list_expenses and retell their numbers.
+- «Сколько потратили» is answered from summary with the total both in VND and in RUB, and the rate's date. \
+Past expenses convert at the latest rate, not at the rate of their day. \
+For any other conversion use convert; never convert currencies yourself.
 - Categories: groceries — food and drinks from shops and markets; eating_out — cafés, restaurants, \
 coffee, delivery; transport — Grab, taxi, fuel, parking; housing — rent, utilities; \
 subscriptions — internet, phone plan, streaming, apps; \

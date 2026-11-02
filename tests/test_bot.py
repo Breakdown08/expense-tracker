@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from expense_tracker.agent import Agent, build_agent, thread
 from expense_tracker.bot import FAILED, GREETING, TELEGRAM_LIMIT, build_dispatcher, chunks
 from expense_tracker.config import Settings
+from tests.conftest import FixedRates
 from tests.scripted import Script, ScriptedModel, scripted
 
 ME: int = 111
@@ -100,7 +101,7 @@ class Telegram:
         self.session: Recorder = Recorder()
         self.bot: Bot = Bot("42:TEST", session=self.session)
         sessions: async_sessionmaker[AsyncSession] = async_sessionmaker()  # no tool runs: never opened
-        self.dp: Dispatcher = build_dispatcher(settings(), agent, sessions)
+        self.dp: Dispatcher = build_dispatcher(settings(), agent, sessions, FixedRates())
         self.update_id: int = 0
 
     async def send(
