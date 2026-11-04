@@ -21,7 +21,7 @@ after your approval.
   SQL, not from the chat. A year of use costs no more tokens per message than the first day.
   Tools report totals too, counted in SQL: the model retells them and never adds up.
 - **Posting flow** — its own LangGraph `StateGraph` (`post.py`), since a run of four calls could not
-  do this: figures (SQL, shares and changes in percent, no amounts) → draft (LLM) → pause for
+  do this: figures (SQL: amounts in dong, shares, changes) → draft (LLM) → pause for
   approval, for hours and across restarts → edit loop → one platform per step, so a failure or a
   crash never posts twice → retry only what failed. Without platform keys the bot leaves the text to
   copy by hand.

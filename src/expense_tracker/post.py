@@ -59,8 +59,13 @@ class PostContext:
 
 PROMPT: str = """You write a short post in Russian for Threads about how a family lives in Vietnam, \
 from one week of their expenses. Plain and personal, no hashtags, no emoji chains, under 450 characters.
-Use only the figures you are given, as they are; they are shares and changes in percent. \
-Never invent amounts, places or events. Reply with the post alone."""
+Use only the figures you are given, as they are: amounts in Vietnamese dong, shares and changes in \
+percent. Keep the amounts in dong, do not convert them. Never invent amounts, places or events. \
+Reply with the post alone."""
+
+
+def dong(amount: Decimal) -> str:
+    return f"{amount:,.0f}".replace(",", " ") + " ₫"
 
 
 def percent(part: Decimal, whole: Decimal) -> int:
@@ -72,8 +77,8 @@ def change(now: Decimal, before: Decimal) -> str:
 
 
 def describe(totals: list[CategoryTotal], period: Period) -> str:
-    """Shares and changes, no amounts: what a family's post shows is theirs to decide, and percent
-    tells the story without the sums. Only VND: other currencies do not add up without a rate."""
+    """Amounts, shares and changes, in dong: the local prices are what makes the post interesting.
+    Only VND: other currencies do not add up without a rate."""
     rows: list[CategoryTotal] = [t for t in totals if t.currency == "VND" and t.total > 0]
     if not rows:
         return ""
@@ -82,12 +87,13 @@ def describe(totals: list[CategoryTotal], period: Period) -> str:
     last: date = period.end - timedelta(days=1)
     lines: list[str] = [
         f"Week {period.start} .. {last}",
-        f"Total compared to the week before: {change(now, before)}",
+        f"Total: {dong(now)}, {change(now, before)} compared to the week before",
     ]
     t: CategoryTotal
     for t in rows:
         lines.append(
-            f"{t.category}: {percent(t.total, now)}% of spending, {change(t.total, t.previous_total)}"
+            f"{t.category}: {dong(t.total)}, {percent(t.total, now)}% of spending, "
+            f"{change(t.total, t.previous_total)}"
         )
     return "\n".join(lines)
 

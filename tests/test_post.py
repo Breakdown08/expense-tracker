@@ -45,7 +45,7 @@ def total(category: Category, now: int, before: int, currency: str = "VND") -> C
     )
 
 
-def test_figures_have_shares_and_no_amounts() -> None:
+def test_figures_have_dong_amounts_and_shares() -> None:
     week: Period = Period(start=date(2026, 11, 2), end=date(2026, 11, 9))
     text: str = describe(
         [
@@ -58,9 +58,9 @@ def test_figures_have_shares_and_no_amounts() -> None:
     )
     assert text.splitlines() == [
         "Week 2026-11-02 .. 2026-11-08",
-        "Total compared to the week before: +0%",
-        "groceries: 75% of spending, +50%",
-        "health: 25% of spending, not there before",
+        "Total: 1 000 000 ₫, +0% compared to the week before",
+        "groceries: 750 000 ₫, 75% of spending, +50%",
+        "health: 250 000 ₫, 25% of spending, not there before",
     ]
     assert describe([], week) == ""
 
