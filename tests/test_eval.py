@@ -3,9 +3,26 @@
 from datetime import date
 from decimal import Decimal
 
-from evals.run import HERE, TODAY, Case, Spent, Verdict, answered, final, judge, load
-from expense_tracker.expenses import Category
+import pytest
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from evals.run import (
+    HERE,
+    TODAY,
+    Case,
+    Spent,
+    Verdict,
+    answered,
+    final,
+    judge,
+    load,
+    run_case,
+)
+from expense_tracker.expenses import Category, NewExpense, add_expenses
 from expense_tracker.models import Expense
+from tests.conftest import requires_db
+from tests.scripted import scripted
 
 
 def row(amount: str, category: str, currency: str = "VND", spent_on: date = TODAY) -> Expense:
@@ -67,3 +84,18 @@ def test_questions_load_and_point_into_the_book() -> None:
     book: list[str] = (HERE / "book.jsonl").read_text().splitlines()
     cases: list[Case] = load(HERE / "questions.jsonl")
     assert cases and all(i < len(book) for case in cases for i in case.gone)
+
+
+@requires_db
+async def test_a_case_stops_before_wiping_any_other_database(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    session: AsyncSession
+    async with sessions() as session:
+        await add_expenses(
+            session, 1, [NewExpense(amount=Decimal(1), category=Category.OTHER, spent_on=TODAY)]
+        )
+    with pytest.raises(RuntimeError, match="stopped"):
+        await run_case(Case(messages=["фо 60к"]), [], scripted(), sessions)
+    async with sessions() as session:
+        assert await session.scalar(select(func.count()).select_from(Expense)) == 1

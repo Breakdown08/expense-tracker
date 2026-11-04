@@ -21,7 +21,7 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from psycopg import sql
 from pydantic import BaseModel
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from expense_tracker.agent import Agent, Context, build_agent, remember, reply, thread
@@ -105,11 +105,20 @@ def tokens(history: list[BaseMessage]) -> tuple[int, int]:
     )
 
 
+async def refuse_real_database(session: AsyncSession) -> None:
+    """Each case wipes the expenses: Postgres itself confirms this is the eval's database, whatever
+    address a later change may pass down."""
+    name: str | None = await session.scalar(text("SELECT current_database()"))
+    if name is None or not name.endswith("_eval"):
+        raise RuntimeError(f"The eval wipes expenses, and this database is {name}: stopped")
+
+
 async def run_case(
     case: Case, book: list[Spent], model: BaseChatModel, sessions: async_sessionmaker[AsyncSession]
 ) -> dict[str, object]:
     session: AsyncSession
     async with sessions() as session:
+        await refuse_real_database(session)
         await session.execute(delete(Expense))
         await session.commit()
         if case.book:
