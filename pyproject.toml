@@ -53,7 +53,7 @@ select = ["E", "F", "I", "B", "UP", "ANN"]
 strict = true
 python_version = "3.14"
 plugins = ["pydantic.mypy"]
-files = ["src", "tests"]
+files = ["src", "tests", "evals"]
 
 [tool.pydantic-mypy]
 init_typed = true

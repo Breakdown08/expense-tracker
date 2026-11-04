@@ -1,0 +1,61 @@
+{"messages": ["фо 60к"], "expected": [{"amount": 60000, "category": "eating_out"}]}
+{"messages": ["кофе 35к"], "expected": [{"amount": 35000, "category": "eating_out"}]}
+{"messages": ["coffee 45k"], "expected": [{"amount": 45000, "category": "eating_out"}]}
+{"messages": ["бань ми 25к"], "expected": [{"amount": 25000, "category": "eating_out"}]}
+{"messages": ["ужин в ресторане 480 000"], "expected": [{"amount": 480000, "category": "eating_out"}]}
+{"messages": ["доставка из grabfood 135к"], "expected": [{"amount": 135000, "category": "eating_out"}]}
+{"messages": ["овощи на рынке 45к"], "expected": [{"amount": 45000, "category": "groceries"}]}
+{"messages": ["курица и рыба 120к"], "expected": [{"amount": 120000, "category": "groceries"}]}
+{"messages": ["продукты в Lotte 412к"], "expected": [{"amount": 412000, "category": "groceries"}]}
+{"messages": ["вода 19л 60к"], "expected": [{"amount": 60000, "category": "groceries"}]}
+{"messages": ["хлеб 9000"], "expected": [{"amount": 9000, "category": "groceries"}]}
+{"messages": ["grab 45k"], "expected": [{"amount": 45000, "category": "transport"}]}
+{"messages": ["бензин 80к"], "expected": [{"amount": 80000, "category": "transport"}]}
+{"messages": ["такси до аэропорта 320к"], "expected": [{"amount": 320000, "category": "transport"}]}
+{"messages": ["парковка 5к"], "expected": [{"amount": 5000, "category": "transport"}]}
+{"messages": ["аренда 12 млн"], "expected": [{"amount": 12000000, "category": "housing"}]}
+{"messages": ["свет 1,2 млн"], "expected": [{"amount": 1200000, "category": "housing"}]}
+{"messages": ["вода за месяц по счётчику 150к"], "expected": [{"amount": 150000, "category": "housing"}]}
+{"messages": ["интернет 250к"], "expected": [{"amount": 250000, "category": "subscriptions"}]}
+{"messages": ["связь на телефон 90к"], "expected": [{"amount": 90000, "category": "subscriptions"}]}
+{"messages": ["netflix 180к"], "expected": [{"amount": 180000, "category": "subscriptions"}]}
+{"messages": ["стирка белья 56к"], "expected": [{"amount": 56000, "category": "household"}]}
+{"messages": ["средство для посуды и губки 70к"], "expected": [{"amount": 70000, "category": "household"}]}
+{"messages": ["починили кондиционер 400к"], "expected": [{"amount": 400000, "category": "household"}]}
+{"messages": ["аптека 84к"], "expected": [{"amount": 84000, "category": "health"}]}
+{"messages": ["стоматолог 1.5 млн"], "expected": [{"amount": 1500000, "category": "health"}]}
+{"messages": ["кроссовки 900к"], "expected": [{"amount": 900000, "category": "clothes"}]}
+{"messages": ["футболка 150к"], "expected": [{"amount": 150000, "category": "clothes"}]}
+{"messages": ["кино 200к"], "expected": [{"amount": 200000, "category": "leisure"}]}
+{"messages": ["подарок маме 300к"], "expected": [{"amount": 300000, "category": "leisure"}]}
+{"messages": ["струны для гитары 220к"], "expected": [{"amount": 220000, "category": "leisure"}]}
+{"messages": ["билеты в Хошимин 2 млн"], "expected": [{"amount": 2000000, "category": "travel"}]}
+{"messages": ["отель на две ночи 1 800 000"], "expected": [{"amount": 1800000, "category": "travel"}]}
+{"messages": ["штраф 500к"], "expected": [{"amount": 500000, "category": "other"}]}
+{"messages": ["кофе 2.5$"], "expected": [{"amount": 2.5, "currency": "USD", "category": "eating_out"}]}
+{"messages": ["подписка на Claude 20 долларов"], "expected": [{"amount": 20, "currency": "USD", "category": "subscriptions"}]}
+{"messages": ["перевод маме 5000 рублей"], "expected": [{"amount": 5000, "currency": "RUB", "category": "other"}]}
+{"messages": ["отель в Бангкоке 2400 бат"], "expected": [{"amount": 2400, "currency": "THB", "category": "travel"}]}
+{"messages": ["самокат 3 евро"], "expected": [{"amount": 3, "currency": "EUR", "category": "transport"}]}
+{"messages": ["вчера фо 60к"], "expected": [{"amount": 60000, "category": "eating_out", "days_ago": 1}]}
+{"messages": ["позавчера продукты 200к"], "expected": [{"amount": 200000, "category": "groceries", "days_ago": 2}]}
+{"messages": ["в субботу кино 180к"], "expected": [{"amount": 180000, "category": "leisure", "days_ago": 2}]}
+{"messages": ["в пятницу grab 60k"], "expected": [{"amount": 60000, "category": "transport", "days_ago": 3}]}
+{"messages": ["аптека 1 ноября 100к"], "expected": [{"amount": 100000, "category": "health", "days_ago": 1}]}
+{"messages": ["фо 60к, кофе 35к"], "expected": [{"amount": 60000, "category": "eating_out"}, {"amount": 35000, "category": "eating_out"}]}
+{"messages": ["grab 45k, кофе вчера 35к"], "expected": [{"amount": 45000, "category": "transport"}, {"amount": 35000, "category": "eating_out", "days_ago": 1}]}
+{"messages": ["мясо 144к овощи 35к хлеб 9к"], "expected": [{"amount": 144000, "category": "groceries"}, {"amount": 35000, "category": "groceries"}, {"amount": 9000, "category": "groceries"}]}
+{"messages": ["кофе 54к\nкурица 120к\nаптека 84к\nовощи 45к"], "expected": [{"amount": 54000, "category": "eating_out"}, {"amount": 120000, "category": "groceries"}, {"amount": 84000, "category": "health"}, {"amount": 45000, "category": "groceries"}]}
+{"messages": ["билет 12.5$, такси 200к, обед 90к"], "expected": [{"amount": 12.5, "currency": "USD", "category": "travel"}, {"amount": 200000, "category": "transport"}, {"amount": 90000, "category": "eating_out"}]}
+{"messages": ["кофе 35"], "expected": [{"amount": 35000, "category": "eating_out"}]}
+{"messages": ["фо 60к", "нет, было 50"], "expected": [{"amount": 50000, "category": "eating_out"}]}
+{"messages": ["кофе 35к", "это было вчера"], "expected": [{"amount": 35000, "category": "eating_out", "days_ago": 1}]}
+{"messages": ["фо 60к", "ошибся, это была доставка продуктов"], "expected": [{"amount": 60000, "category": "groceries"}]}
+{"messages": ["фо 60к, кофе 35к", "кофе не считай"], "expected": [{"amount": 60000, "category": "eating_out"}]}
+{"messages": ["grab 45k", "ещё кофе 30к"], "expected": [{"amount": 45000, "category": "transport"}, {"amount": 30000, "category": "eating_out"}]}
+{"messages": ["кофе"], "expected": []}
+{"messages": ["60к"], "expected": []}
+{"messages": ["потратили сегодня кучу денег"], "expected": []}
+{"messages": ["привет, что умеешь?"], "expected": []}
+{"messages": ["сколько потратили сегодня?"], "expected": []}
+{"messages": ["завтра надо заплатить за аренду"], "expected": []}
