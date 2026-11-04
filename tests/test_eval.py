@@ -3,7 +3,7 @@
 from datetime import date
 from decimal import Decimal
 
-from evals.run import HERE, TODAY, Case, Spent, Verdict, judge, load
+from evals.run import HERE, TODAY, Case, Spent, Verdict, answered, final, judge, load
 from expense_tracker.expenses import Category
 from expense_tracker.models import Expense
 
@@ -46,3 +46,24 @@ def test_nothing_expected_nothing_recorded() -> None:
 def test_phrases_load() -> None:
     cases: list[Case] = load(HERE / "phrases.jsonl")
     assert len(cases) >= 50
+
+
+def test_an_answer_needs_every_pattern_and_no_id() -> None:
+    case: Case = Case(messages=["сколько?"], answer=["260 000", "832"])
+    assert answered(case, "Итого: 260 000 ₫ · 832 ₽")
+    assert not answered(case, "Итого: 260 000 ₫")
+    assert not answered(case, "#12: 260 000 ₫ · 832 ₽")
+
+
+def test_final_book_drops_the_gone_and_adds_the_expected() -> None:
+    coffee: Spent = Spent(amount=Decimal(35000), category=Category.EATING_OUT)
+    fixed: Spent = Spent(amount=Decimal(40000), category=Category.EATING_OUT)
+    case: Case = Case(messages=["во второй было 40к"], book=True, gone=[1], expected=[fixed])
+    assert final(case, [FO, coffee]) == [FO, fixed]
+    assert final(Case(messages=["фо 60к"], expected=[FO]), [coffee]) == [FO]  # an empty book to start
+
+
+def test_questions_load_and_point_into_the_book() -> None:
+    book: list[str] = (HERE / "book.jsonl").read_text().splitlines()
+    cases: list[Case] = load(HERE / "questions.jsonl")
+    assert cases and all(i < len(book) for case in cases for i in case.gone)

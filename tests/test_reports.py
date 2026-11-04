@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from expense_tracker.expenses import Category, NewExpense, add_expenses
 from expense_tracker.models import Expense
 from expense_tracker.rates import Rates
-from expense_tracker.reports import report, title, total_lines, week_start
+from expense_tracker.reports import Report, report, title, total_lines, week_start
 from tests.conftest import FixedRates, requires_db
 
 TODAY: date = date(2026, 11, 4)  # a Wednesday
@@ -80,19 +80,21 @@ async def seed(sessions: async_sessionmaker[AsyncSession]) -> list[Expense]:
 @requires_db
 async def test_one_day_lists_expenses(sessions: async_sessionmaker[AsyncSession]) -> None:
     rows: list[Expense] = await seed(sessions)
-    text: str = await report(sessions, FixedRates(), TODAY, TODAY, TODAY)
-    assert text.splitlines()[:3] == [
+    result: Report = await report(sessions, FixedRates(), TODAY, TODAY, TODAY)
+    assert result.text.splitlines()[:3] == [
         "Сегодня, 4 ноября",
-        f"#{rows[0].id} 60 000 ₫ Продукты «рынок»",
+        "1. 60 000 ₫ Продукты «рынок»",
         "Итого: 60 000 ₫ · 189 ₽",
     ]
+    assert f"#{rows[0].id}" in result.for_model() and "#" not in result.text
 
 
 @requires_db
 async def test_a_period_goes_by_category(sessions: async_sessionmaker[AsyncSession]) -> None:
     await seed(sessions)
-    text: str = await report(sessions, FixedRates(), TODAY, date(2026, 11, 2), TODAY)
-    assert text.splitlines()[:4] == [
+    result: Report = await report(sessions, FixedRates(), TODAY, date(2026, 11, 2), TODAY)
+    assert result.rows == [] and result.for_model() == result.text
+    assert result.text.splitlines()[:4] == [
         "С 2 ноября по 4 ноября",
         "Продукты: 100 000 ₫ (2)",
         "Транспорт: 45 000 ₫ (1)",  # Sunday's 99 000 is another week
@@ -102,5 +104,4 @@ async def test_a_period_goes_by_category(sessions: async_sessionmaker[AsyncSessi
 
 @requires_db
 async def test_an_empty_day(sessions: async_sessionmaker[AsyncSession]) -> None:
-    text: str = await report(sessions, FixedRates(), TODAY, TODAY, TODAY)
-    assert text == "Сегодня, 4 ноября: трат нет"
+    assert (await report(sessions, FixedRates(), TODAY, TODAY, TODAY)).text == "Сегодня, 4 ноября: трат нет"

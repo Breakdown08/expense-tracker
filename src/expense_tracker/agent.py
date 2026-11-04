@@ -37,9 +37,11 @@ from expense_tracker import expenses, reports
 from expense_tracker.expenses import Category, CategoryTotal, ExpenseChanges, NewExpense
 from expense_tracker.models import Expense
 from expense_tracker.rates import Rates, RateSource, UnknownCurrency
-from expense_tracker.reports import ONE, entry, latest_rates, money, period, prices
+from expense_tracker.reports import ONE, Report, entry, latest_rates, money, period, prices, with_ids
 
 log: logging.Logger = logging.getLogger(__name__)
+
+NO_RECORD: str = "Такой записи нет"
 
 
 @dataclass(frozen=True)
@@ -98,8 +100,8 @@ def grand_total(totals: list[CategoryTotal], rates: Rates | None) -> list[str]:
     return lines
 
 
-@tool
-async def add_expenses(items: list[ExpenseInput], runtime: ToolRuntime[Context]) -> str:
+@tool(response_format="content_and_artifact")
+async def add_expenses(items: list[ExpenseInput], runtime: ToolRuntime[Context]) -> tuple[str, str]:
     """Record one or more expenses from a single message, all in one call."""
     ctx: Context = runtime.context
     new: list[NewExpense] = [
@@ -117,18 +119,22 @@ async def add_expenses(items: list[ExpenseInput], runtime: ToolRuntime[Context])
         for row in rows:
             message[row.currency] = message.get(row.currency, Decimal(0)) + row.amount
         recorded.append(f"Всего в сообщении: {prices(message)}")
-    return "\n".join(["Записал:", *recorded, *days])
+    answer: str = "\n".join(["Записал:", *recorded, *days])
+    return with_ids(answer, rows), answer
 
 
-@tool
-async def edit_expense(expense_id: int, changes: ExpenseChanges, runtime: ToolRuntime[Context]) -> str:
+@tool(response_format="content_and_artifact")
+async def edit_expense(
+    expense_id: int, changes: ExpenseChanges, runtime: ToolRuntime[Context]
+) -> tuple[str, str]:
     """Correct a recorded expense by its #id; only the given fields change."""
     session: AsyncSession
     async with runtime.context.sessions() as session:
         row: Expense | None = await expenses.edit_expense(session, expense_id, changes)
         if row is None:
-            return f"Нет записи #{expense_id}"
-        return f"Исправил: {entry(row)}\n{await day_line(session, row.spent_on)}"
+            return NO_RECORD, NO_RECORD
+        answer: str = f"Исправил: {entry(row)}\n{await day_line(session, row.spent_on)}"
+    return with_ids(answer, [row]), answer
 
 
 @tool
@@ -136,10 +142,10 @@ async def delete_expense(expense_id: int, runtime: ToolRuntime[Context]) -> str:
     """Delete a recorded expense by its #id."""
     session: AsyncSession
     async with runtime.context.sessions() as session:
-        day: date | None = await expenses.delete_expense(session, expense_id)
-        if day is None:
-            return f"Нет записи #{expense_id}"
-        return f"Удалил #{expense_id}\n{await day_line(session, day)}"
+        row: Expense | None = await expenses.delete_expense(session, expense_id)
+        if row is None:
+            return NO_RECORD
+        return f"Удалил: {entry(row)}\n{await day_line(session, row.spent_on)}"
 
 
 @tool
@@ -153,12 +159,13 @@ async def list_expenses(
     return "\n".join(line(r) for r in rows) or "No expenses"
 
 
-@tool
-async def report(start: date, end: date, runtime: ToolRuntime[Context]) -> str:
+@tool(response_format="content_and_artifact")
+async def report(start: date, end: date, runtime: ToolRuntime[Context]) -> tuple[str, str]:
     """What was spent from start to end (both included), with the total in VND and RUB. Reaches the user
     word for word."""
     ctx: Context = runtime.context
-    return await reports.report(ctx.sessions, ctx.rates, ctx.today, start, end)
+    result: Report = await reports.report(ctx.sessions, ctx.rates, ctx.today, start, end)
+    return result.for_model(), result.text
 
 
 @tool
@@ -217,7 +224,10 @@ unless they name another currency. Today is {today:%A, %Y-%m-%d}.
 Don't repeat the tag in replies; anyone may correct anyone's expense.
 - Messages are short: «фо 60к», «grab 45k, кофе 35к». «к»/«k» means thousand, «млн»/«tr» million.
 - Record everything from one message with a single add_expenses call.
-- «нет, было 50» corrects the expense just recorded: use its #id from the tool result.
+- «нет, было 50» corrects the expense just recorded: use its #id from the tool result. \
+#ids are for your tools: never show them, the user knows expenses by amount, name or number. \
+«удали вторую» means number 2 of the last day's list in this chat, whichever day it was; each list \
+comes with its ids. With no list here, get that day from list_expenses, numbered in its order.
 - The chat history holds only today's messages. Anything earlier — yesterday, last month — \
 comes from list_expenses or summary, never from memory.
 - The results of add_expenses, edit_expense, delete_expense, report and convert go to the user as they \
@@ -225,7 +235,9 @@ are and end your turn, so when one message asks for several things make all the 
 - «Сколько потратили», «что записано» for a day or a period is report: the user gets it word for word. \
 «Неделя» without a date means from this week's Monday to today. \
 Use summary or list_expenses only when the answer takes more than a total: comparing periods, one category, \
-what grew, the total in another currency than VND and RUB. Then never compute totals yourself. \
+what grew. Then never compute totals yourself. \
+report only knows VND and RUB: for a total in dollars or anything else, summary first, then convert its \
+«All in VND». \
 Past expenses convert at the latest rate, not at the rate of their day. \
 For any other conversion use convert; never convert currencies yourself.
 - Categories: groceries — food and drinks from shops and markets; eating_out — cafés, restaurants, \
@@ -324,6 +336,15 @@ def thread(chat_id: int, day: date) -> str:
     return f"{chat_id}:{day.isoformat()}"
 
 
+async def remember(agent: Agent, chat_id: int, day: date, asked: str, shown: str) -> None:
+    """A command answers without the agent, yet «удали вторую» that follows it is about that list."""
+    await agent.aupdate_state(
+        {"configurable": {"thread_id": thread(chat_id, day)}},
+        {"messages": [HumanMessage(asked), AIMessage(shown)]},
+        as_node="model",
+    )
+
+
 async def reply(agent: Agent, chat_id: int, text: str, context: Context) -> str:
     """One user message in, the agent's last answer out, in today's thread of the chat."""
     result: dict[str, object] = await agent.ainvoke(
@@ -335,7 +356,7 @@ async def reply(agent: Agent, chat_id: int, text: str, context: Context) -> str:
     assert isinstance(messages, list)
     direct: list[ToolMessage] = tool_results(messages)
     if direct:
-        return "\n\n".join(m.text for m in direct)
+        return "\n\n".join(m.artifact or m.text for m in direct)  # the artifact has no #ids
     last: object = messages[-1]
     assert isinstance(last, AIMessage)
     return last.text  # text blocks only: gpt-oss reasoning stays out of Telegram

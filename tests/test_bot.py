@@ -102,6 +102,23 @@ class SlowModel(ScriptedModel):
         return await super()._agenerate(messages, stop, run_manager, **kwargs)
 
 
+class Watching(ScriptedModel):
+    """Keeps the messages of every call."""
+
+    seen: list[list[BaseMessage]] = []
+
+    @override
+    async def _agenerate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        self.seen.append(messages)
+        return await super()._agenerate(messages, stop, run_manager, **kwargs)
+
+
 def settings() -> Settings:
     return Settings(
         _env_file=None,
@@ -354,10 +371,27 @@ async def test_a_command_never_reaches_the_model(
 ) -> None:
     await spend(sessions)
     script: Script = Script([AIMessage("never reached")])
-    telegram: Telegram = Telegram(build_agent(ScriptedModel(messages=script)), sessions)
+    agent: Agent = build_agent(ScriptedModel(messages=script), InMemorySaver())
+    telegram: Telegram = Telegram(agent, sessions)
     await telegram.send(ME, command)
     assert script.answers == [AIMessage("never reached")]
     assert "Итого: 60 000 ₫" in telegram.session.sent()[0]
+
+
+@requires_db
+async def test_the_list_of_a_command_is_there_for_the_next_message(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    await spend(sessions)
+    model: Watching = Watching(messages=Script([AIMessage("Какую запись?")]))
+    telegram: Telegram = Telegram(build_agent(model, InMemorySaver()), sessions)
+    await telegram.send(ME, "/сегодня")
+    assert "#" not in telegram.session.sent()[0] and "1. 60 000 ₫" in telegram.session.sent()[0]
+    await telegram.send(ME, "удали первую")
+    seen: list[str] = [str(m.content) for m in model.seen[0]]
+    assert seen[-3] == "[Кирилл] /сегодня"
+    assert "1. 60 000 ₫" in seen[-2] and "Record ids, in the order above: #" in seen[-2]
+    assert seen[-1] == "[Кирилл] удали первую"
 
 
 @requires_db

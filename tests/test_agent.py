@@ -63,8 +63,8 @@ async def test_one_message_several_expenses(sessions: async_sessionmaker[AsyncSe
     rows: list[Expense] = await recorded(sessions)
     assert answer.splitlines() == [
         "Записал:",
-        f"#{rows[1].id} 60 000 ₫ Кафе «фо»",
-        f"#{rows[0].id} 35 000 ₫ Кафе «кофе»",
+        "60 000 ₫ Кафе «фо»",
+        "35 000 ₫ Кафе «кофе»",
         "Всего в сообщении: 95 000 ₫",
         "За 1 ноября: 35 000 ₫",
         "За 2 ноября: 60 000 ₫",
@@ -96,6 +96,19 @@ async def test_correction_uses_memory_of_the_chat(sessions: async_sessionmaker[A
         await agent.aget_state({"configurable": {"thread_id": thread(CHAT, TODAY)}})
     ).values["messages"]
     assert f"#{row.id}" in str(history[2].content)  # the tool result the model read the id from
+
+
+async def test_ids_reach_the_model_and_not_the_chat(sessions: async_sessionmaker[AsyncSession]) -> None:
+    agent: Agent = build_agent(
+        scripted(call("add_expenses", {"items": [{"amount": 60000, "category": "eating_out"}]})),
+        InMemorySaver(),
+    )
+    answer: str = await reply(agent, CHAT, "фо 60к", context(sessions))
+    assert "#" not in answer
+    history: list[BaseMessage] = (
+        await agent.aget_state({"configurable": {"thread_id": thread(CHAT, TODAY)}})
+    ).values["messages"]
+    assert "Record ids, in the order above: #" in str(history[-1].content)
 
 
 async def test_bad_tool_arguments_go_back_to_the_model(sessions: async_sessionmaker[AsyncSession]) -> None:
@@ -183,7 +196,7 @@ async def test_a_new_day_starts_a_new_history(sessions: async_sessionmaker[Async
 async def tool_answers(
     sessions: async_sessionmaker[AsyncSession], *steps: tuple[str, AIMessage]
 ) -> list[str]:
-    """What the tools told the model, one per step, in one chat."""
+    """What the tools told the chat, one per step, in one chat."""
     script: list[AIMessage] = []
     step: tuple[str, AIMessage]
     for step in steps:
@@ -194,7 +207,7 @@ async def tool_answers(
     history: list[BaseMessage] = (
         await agent.aget_state({"configurable": {"thread_id": thread(CHAT, TODAY)}})
     ).values["messages"]
-    return [str(m.content) for m in history if isinstance(m, ToolMessage)]
+    return [m.artifact or str(m.content) for m in history if isinstance(m, ToolMessage)]
 
 
 async def test_totals_after_a_record_come_from_the_code(sessions: async_sessionmaker[AsyncSession]) -> None:
@@ -237,11 +250,14 @@ async def test_totals_after_a_correction_and_a_deletion(sessions: async_sessionm
     edit: AIMessage = call("edit_expense", {"expense_id": rows[0].id, "changes": {"amount": 50000}})
     assert (await tool_answers(sessions, ("нет, было 50", edit)))[0].endswith("За 2 ноября: 85 000 ₫")
     remove: AIMessage = call("delete_expense", {"expense_id": rows[1].id})
-    assert (await tool_answers(sessions, ("кофе не было", remove)))[0].endswith("За 2 ноября: 50 000 ₫")
+    assert (await tool_answers(sessions, ("кофе не было", remove)))[0].splitlines() == [
+        "Удалил: 35 000 ₫ Кафе",
+        "За 2 ноября: 50 000 ₫",
+    ]
     remove = call("delete_expense", {"expense_id": rows[0].id})
     assert (await tool_answers(sessions, ("и фо", remove)))[0].endswith("За 2 ноября: 0")
     remove = call("delete_expense", {"expense_id": rows[0].id})
-    assert (await tool_answers(sessions, ("ещё раз", remove)))[0] == f"Нет записи #{rows[0].id}"
+    assert (await tool_answers(sessions, ("ещё раз", remove)))[0] == "Такой записи нет"
 
 
 async def summary_answer(sessions: async_sessionmaker[AsyncSession], rates: FixedRates) -> str:

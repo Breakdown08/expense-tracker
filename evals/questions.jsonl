@@ -1,0 +1,17 @@
+{"book": true, "messages": ["сколько потратили сегодня?"], "answer": ["260 000", "832"]}
+{"book": true, "messages": ["что вчера записано?"], "answer": ["200 000", "150 000", "350 000"]}
+{"book": true, "messages": ["сколько потратили 25 октября?"], "answer": ["180 000"]}
+{"book": true, "messages": ["сколько потратили 1 октября?"], "answer": ["(?i)нет|не было|ничего"]}
+{"book": true, "messages": ["сколько потратили на прошлой неделе?"], "answer": ["8 905 000"]}
+{"book": true, "messages": ["сколько на кафе за этот месяц?"], "answer": ["95 000"]}
+{"book": true, "messages": ["сколько ушло на транспорт за последние 7 дней?"], "answer": ["100 000"]}
+{"book": true, "messages": ["на что больше всего ушло в октябре?"], "answer": ["(?i)жиль|аренд|housing", "8 000 000"]}
+{"book": true, "messages": ["сколько вчера вышло в долларах?"], "answer": ["\\b14\\b"]}
+{"book": true, "messages": ["сколько будет 100 долларов в донгах?"], "answer": ["2 500 000"]}
+{"book": true, "shown": 0, "messages": ["удали вторую"], "gone": [1]}
+{"book": true, "shown": 1, "messages": ["удали вторую"], "gone": [5]}
+{"book": true, "shown": 0, "messages": ["удали 2 и 4"], "gone": [1, 3]}
+{"book": true, "shown": 0, "messages": ["во второй было 40к"], "gone": [1], "expected": [{"amount": 40000, "category": "eating_out"}]}
+{"book": true, "messages": ["что вчера записано?", "удали первую"], "gone": [4]}
+{"book": true, "messages": ["удали кофе"], "gone": [1]}
+{"book": true, "messages": ["удали вчерашнее кино"], "gone": [5]}

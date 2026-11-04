@@ -1,6 +1,7 @@
 """Answers made by code from a template: commands and direct tool answers spend no tokens."""
 
 import logging
+from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -66,9 +67,22 @@ def day_name(day: date) -> str:
 
 
 def entry(row: Expense) -> str:
-    """The #id stays visible: it is how a correction finds the record."""
     note: str = f" «{row.note}»" if row.note else ""
-    return f"#{row.id} {price(row.amount, row.currency)} {CATEGORY_NAMES[Category(row.category)]}{note}"
+    return f"{price(row.amount, row.currency)} {CATEGORY_NAMES[Category(row.category)]}{note}"
+
+
+def with_ids(text: str, rows: list[Expense]) -> str:
+    """People read amounts, not keys; the model needs the keys to correct a record."""
+    return "\n".join([text, f"Record ids, in the order above: {', '.join(f'#{r.id}' for r in rows)}"])
+
+
+@dataclass(frozen=True)
+class Report:
+    text: str
+    rows: list[Expense]  # the numbered ones: a period goes by category and has none
+
+    def for_model(self) -> str:
+        return with_ids(self.text, self.rows) if self.rows else self.text
 
 
 def week_start(today: date) -> date:
@@ -122,8 +136,9 @@ def total_lines(totals: dict[str, Decimal], rates: Rates | None) -> list[str]:
 
 async def report(
     sessions: async_sessionmaker[AsyncSession], rates: RateSource, today: date, start: date, end: date
-) -> str:
-    """One day expense by expense, a longer period by category; start and end are both included."""
+) -> Report:
+    """One day expense by expense, numbered from 1, a longer period by category; start and end are both
+    included."""
     head: str = title(start, end, today)
     days: Period = period(start, end)
     session: AsyncSession
@@ -131,12 +146,13 @@ async def report(
         totals: list[CategoryTotal] = [t for t in await expenses.summary(session, days) if t.total > 0]
         rows: list[Expense] = await expenses.list_expenses(session, days) if start == end else []
     if not totals:
-        return f"{head}: трат нет"
-    body: list[str] = [entry(row) for row in rows] or [
+        return Report(f"{head}: трат нет", [])
+    body: list[str] = [f"{n}. {entry(row)}" for n, row in enumerate(rows, 1)] or [
         f"{CATEGORY_NAMES[t.category]}: {price(t.total, t.currency)} ({t.count})" for t in totals
     ]
     spent: dict[str, Decimal] = {}
     t: CategoryTotal
     for t in totals:
         spent[t.currency] = spent.get(t.currency, Decimal(0)) + t.total
-    return "\n".join([head, *body, *total_lines(spent, await latest_rates(rates, today))])
+    lines: list[str] = [head, *body, *total_lines(spent, await latest_rates(rates, today))]
+    return Report("\n".join(lines), rows)

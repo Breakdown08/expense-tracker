@@ -30,13 +30,13 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.types import Command as Resume
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from expense_tracker.agent import Agent, Context, build_agent, reply
+from expense_tracker.agent import Agent, Context, build_agent, remember, reply
 from expense_tracker.config import Settings
 from expense_tracker.db import make_engine, make_sessions
 from expense_tracker.platforms import publishers
 from expense_tracker.post import Action, Answer, PostContext, PostGraph, Publisher, build_post_graph, pause
 from expense_tracker.rates import BankOfRussia, RateSource
-from expense_tracker.reports import report, week_start
+from expense_tracker.reports import Report, report, week_start
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -193,9 +193,12 @@ def build_dispatcher(
             )
 
     async def send_report(message: Message, start: date, end: date, today: date) -> None:
+        result: Report = await report(sessions, rates, today, start, end)
         part: str
-        for part in chunks(await report(sessions, rates, today, start, end)):
+        for part in chunks(result.text):
             await message.answer(part)
+        if result.rows:
+            await remember(agent, message.chat.id, today, signed(message), result.for_model())
 
     @dp.message(Command("сегодня", "today", ignore_case=True))
     async def on_today(message: Message) -> None:

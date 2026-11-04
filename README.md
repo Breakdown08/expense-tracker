@@ -36,17 +36,20 @@ after your approval.
 ## Measured
 
 `uv run python -m evals.run` sends phrases through the real agent and compares what landed in the
-database with what should have: amount, currency, day, category. It costs money, so it runs by hand.
+database with what should have: amount, currency, day, category. Questions run against a prepared
+book, and their answers must hold the figures worked out by hand. It costs money, so it runs by hand.
 
-| Model | Exact | Amounts | Tokens per case | Cost of a run |
-|---|---|---|---|---|
-| `claude-haiku-5-5` | 61/61 | 61/61 | 2 900 in, 141 out | $0.02 |
+| Model | Exact | Amounts | Answers | Tokens per case | Cost of a run |
+|---|---|---|---|---|---|
+| `claude-haiku-5-5` | 78/78 | 78/78 | 78/78 | 3 400 in, 172 out | $0.03 |
 
-Read that as «no misses on this set», not as 100% accuracy. The 61 phrases
+Read that as «no misses on this set», not as 100% accuracy. The first run of the questions did miss:
+«сколько вчера вышло в долларах?» got a total in dong, and the prompt was fixed. The 61 phrases
 ([`evals/phrases.jsonl`](evals/phrases.jsonl)) are written by hand in the style of real messages —
 real ones stay private — by the author of the prompt, and they are easy for the model: categories,
 foreign currencies, relative dates, several expenses at once, corrections, and messages where it
-must ask instead of guessing. It does not cover answers to questions such as «сколько за неделю?».
+must ask instead of guessing. The 17 cases in [`evals/questions.jsonl`](evals/questions.jsonl) ask
+for totals, periods and conversions, and correct records by their number in a list.
 The default Groq model has not been run: no key here yet. Raw answers are in
 [`evals/results/`](evals/results/).
 

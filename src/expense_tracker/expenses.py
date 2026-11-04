@@ -90,15 +90,14 @@ async def edit_expense(session: AsyncSession, expense_id: int, changes: ExpenseC
     return row
 
 
-async def delete_expense(session: AsyncSession, expense_id: int) -> date | None:
-    """The day the expense was on, None if there was no such expense."""
+async def delete_expense(session: AsyncSession, expense_id: int) -> Expense | None:
+    """The expense as it was, None if there was no such expense."""
     row: Expense | None = await session.get(Expense, expense_id)
     if row is None:
         return None
-    day: date = row.spent_on
     await session.delete(row)
     await session.commit()
-    return day
+    return row
 
 
 async def day_totals(session: AsyncSession, day: date) -> dict[str, Decimal]:

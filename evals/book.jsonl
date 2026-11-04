@@ -1,0 +1,11 @@
+{"amount": 60000, "category": "eating_out", "note": "фо"}
+{"amount": 35000, "category": "eating_out", "note": "кофе"}
+{"amount": 45000, "category": "transport", "note": "grab"}
+{"amount": 120000, "category": "groceries", "note": "рынок"}
+{"amount": 200000, "category": "groceries", "note": "продукты", "days_ago": 1}
+{"amount": 150000, "category": "leisure", "note": "кино", "days_ago": 1}
+{"amount": 20, "currency": "USD", "category": "subscriptions", "note": "claude", "days_ago": 2}
+{"amount": 8000000, "category": "housing", "note": "аренда", "days_ago": 3}
+{"amount": 55000, "category": "transport", "note": "grab", "days_ago": 5}
+{"amount": 180000, "category": "groceries", "note": "продукты", "days_ago": 8}
+{"amount": 90000, "category": "eating_out", "note": "кафе", "days_ago": 9}
