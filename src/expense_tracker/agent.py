@@ -1,7 +1,7 @@
 """Expense agent: LangChain `create_agent` with tools over `expenses.py`. It knows nothing of posts."""
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -16,16 +16,18 @@ from langchain.agents.middleware import (
     InputAgentState,
     ModelCallLimitMiddleware,
     ModelRequest,
+    ModelResponse,
     ModelRetryMiddleware,
     OutputAgentState,
     ToolCallLimitMiddleware,
     dynamic_prompt,
     hook_config,
+    wrap_model_call,
 )
 from langchain.agents.middleware.model_call_limit import ModelCallLimitState
 from langchain.tools import ToolRuntime, tool
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
@@ -254,6 +256,36 @@ def system_prompt(request: ModelRequest[Context]) -> str:
     return PROMPT.format(today=request.runtime.context.today)
 
 
+def without_past_thinking(messages: Sequence[AnyMessage]) -> list[AnyMessage]:
+    """Drops thinking from the turns before the last human message.
+
+    Anthropic binds a thinking block to the system prompt and the tools it was made under, so after a
+    deploy that changes either, today's history would fail with a 400 until midnight. The block must
+    stay only in the turn in progress, which a tool result continues.
+    """
+    last: int = max((i for i, m in enumerate(messages) if isinstance(m, HumanMessage)), default=0)
+    kept: list[AnyMessage] = list(messages)
+    i: int
+    for i in range(last):
+        message: AnyMessage = kept[i]
+        if isinstance(message, AIMessage) and isinstance(message.content, list):
+            content: list[str | dict[Any, Any]] = [b for b in message.content if not thinking(b)]
+            kept[i] = message.model_copy(update={"content": content})
+    return kept
+
+
+def thinking(block: str | dict[Any, Any]) -> bool:
+    return isinstance(block, dict) and block.get("type") in ("thinking", "redacted_thinking")
+
+
+@wrap_model_call
+async def forget_past_thinking(
+    request: ModelRequest[Context],
+    handler: Callable[[ModelRequest[Context]], Awaitable[ModelResponse[Any]]],
+) -> ModelResponse[Any]:
+    return await handler(request.override(messages=without_past_thinking(request.messages)))
+
+
 # Worth retrying: rate limits (Groq free tier: 8K tokens a minute), network, provider 5xx.
 # Not worth it: a wrong key or a malformed request fails the same way every time.
 TRANSIENT: tuple[type[Exception], ...] = (
@@ -323,6 +355,7 @@ def build_agent(model: BaseChatModel, checkpointer: Checkpointer = None, retry_d
     chain: list[AgentMiddleware[Any, Context]] = [
         DirectAnswer(),
         system_prompt,
+        forget_past_thinking,
         ModelRetryMiddleware(retry_on=TRANSIENT, max_retries=3, initial_delay=retry_delay, max_delay=30.0),
         CallLimit(run_limit=6),  # one message never loops for long
         ToolCallLimitMiddleware(run_limit=8),

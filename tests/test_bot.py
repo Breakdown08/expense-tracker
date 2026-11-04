@@ -408,3 +408,13 @@ async def test_a_command_from_a_stranger_is_dropped() -> None:
     telegram: Telegram = Telegram(build_agent(scripted()))
     await telegram.send(STRANGER, "/сегодня")
     assert telegram.session.sent() == []
+
+
+async def test_the_next_turn_goes_to_the_model_without_past_thinking() -> None:
+    idea: dict[str, str] = {"type": "thinking", "thinking": "…", "signature": "made under another prompt"}
+    said: dict[str, str] = {"type": "text", "text": "Привет"}
+    model: Watching = Watching(messages=Script([AIMessage(content=[idea, said]), AIMessage("Ещё раз")]))
+    telegram: Telegram = Telegram(build_agent(model, InMemorySaver()))
+    await telegram.send(ME, "привет")
+    await telegram.send(ME, "ещё раз")
+    assert model.seen[1][-2].content == [said]

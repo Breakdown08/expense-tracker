@@ -6,12 +6,20 @@ from decimal import Decimal
 import groq
 import httpx
 import pytest
-from langchain_core.messages import AIMessage, BaseMessage, ToolCall, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, HumanMessage, ToolCall, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from expense_tracker.agent import LIMIT_REACHED, Agent, Context, build_agent, reply, thread
+from expense_tracker.agent import (
+    LIMIT_REACHED,
+    Agent,
+    Context,
+    build_agent,
+    reply,
+    thread,
+    without_past_thinking,
+)
 from expense_tracker.expenses import Period, list_expenses
 from expense_tracker.models import Expense
 from tests.conftest import FixedRates, requires_db
@@ -377,3 +385,21 @@ async def test_analysis_goes_back_to_the_model(sessions: async_sessionmaker[Asyn
         )
     )
     assert await reply(agent, CHAT, "почему меньше?", context(sessions)) == "Меньше, чем было."
+
+
+def test_past_turns_lose_thinking_and_the_current_one_keeps_it() -> None:
+    """A changed prompt invalidates thinking in today's history; a tool loop still needs its own."""
+    idea: dict[str, str] = {"type": "thinking", "thinking": "…", "signature": "old"}
+    said: dict[str, str] = {"type": "text", "text": "Записал."}
+    now: AIMessage = AIMessage(content=[{**idea, "signature": "new"}, said])
+    messages: list[AnyMessage] = [
+        HumanMessage("фо 60к"),
+        AIMessage(content=[idea, said]),
+        HumanMessage("кофе 35к"),
+        now,
+        ToolMessage("Записал", tool_call_id="c1"),
+    ]
+    sent: list[AnyMessage] = without_past_thinking(messages)
+    assert sent[1].content == [said]
+    assert sent[3] is now
+    assert messages[1].content == [idea, said]  # the checkpoint's own history stays whole
