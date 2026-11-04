@@ -2,7 +2,8 @@
 
 import asyncio
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from decimal import Decimal
 from typing import Any, override
 from zoneinfo import ZoneInfo
 
@@ -10,8 +11,18 @@ import pytest
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.base import BaseSession
 from aiogram.methods import SendMessage, TelegramMethod
-from aiogram.types import Chat, Message, PhotoSize, Update, User
+from aiogram.types import (
+    CallbackQuery,
+    Chat,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+    PhotoSize,
+    Update,
+    User,
+)
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatResult
 from langgraph.checkpoint.memory import InMemorySaver
@@ -19,10 +30,21 @@ from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from expense_tracker.agent import Agent, build_agent, thread
-from expense_tracker.bot import FAILED, GREETING, TELEGRAM_LIMIT, build_dispatcher, chunks
+from expense_tracker.bot import (
+    ASK_COMMENT,
+    FAILED,
+    GREETING,
+    NOTHING_TO_POST,
+    TELEGRAM_LIMIT,
+    build_dispatcher,
+    chunks,
+)
 from expense_tracker.config import Settings
-from tests.conftest import FixedRates
+from expense_tracker.expenses import Category, NewExpense, add_expenses
+from expense_tracker.post import Publisher, build_post_graph
+from tests.conftest import FixedRates, requires_db
 from tests.scripted import Script, ScriptedModel, scripted
+from tests.test_post import Recording
 
 ME: int = 111
 WIFE: int = 222
@@ -89,6 +111,20 @@ def settings() -> Settings:
     )
 
 
+def local_day() -> date:
+    return datetime.now(ZoneInfo(settings().timezone)).date()
+
+
+async def spend(sessions: async_sessionmaker[AsyncSession]) -> None:
+    """Something for this week's post: the flow's date is the real one here."""
+    session: AsyncSession
+    async with sessions() as session:
+        item: NewExpense = NewExpense(
+            amount=Decimal(60000), category=Category.GROCERIES, spent_on=local_day()
+        )
+        await add_expenses(session, ME, [item])
+
+
 def today(chat_id: int) -> str:
     """The thread the bot writes to now: the chat's day in the family's time zone."""
     return thread(chat_id, datetime.now(ZoneInfo(settings().timezone)).date())
@@ -97,11 +133,24 @@ def today(chat_id: int) -> str:
 class Telegram:
     """A dispatcher, a bot on the recorder, and updates numbered as Telegram does."""
 
-    def __init__(self, agent: Agent) -> None:
+    def __init__(
+        self,
+        agent: Agent,
+        sessions: async_sessionmaker[AsyncSession] | None = None,
+        model: BaseChatModel | None = None,
+        platforms: list[Publisher] | None = None,
+    ) -> None:
         self.session: Recorder = Recorder()
         self.bot: Bot = Bot("42:TEST", session=self.session)
-        sessions: async_sessionmaker[AsyncSession] = async_sessionmaker()  # no tool runs: never opened
-        self.dp: Dispatcher = build_dispatcher(settings(), agent, sessions, FixedRates())
+        self.dp: Dispatcher = build_dispatcher(
+            settings(),
+            agent,
+            sessions or async_sessionmaker(),  # no tool runs in most tests: never opened
+            FixedRates(),
+            build_post_graph(InMemorySaver()),
+            model or scripted(),
+            platforms or [],
+        )
         self.update_id: int = 0
 
     async def send(
@@ -117,6 +166,45 @@ class Telegram:
             photo=[PhotoSize(file_id="f", file_unique_id="u", width=1, height=1)] if photo else None,
         )
         await self.dp.feed_update(self.bot, Update(update_id=self.update_id, message=message))
+
+    async def reply(self, user: int, to: str, text: str) -> None:
+        """Answer the bot's message, as ForceReply makes a person do."""
+        self.update_id += 1
+        chat: Chat = Chat(id=user, type="private")
+        now: datetime = datetime.now(UTC)
+        message: Message = Message(
+            message_id=self.update_id,
+            date=now,
+            chat=chat,
+            from_user=User(id=user, is_bot=False, first_name=NAMES[user]),
+            text=text,
+            reply_to_message=Message(message_id=1, date=now, chat=chat, text=to),
+        )
+        await self.dp.feed_update(self.bot, Update(update_id=self.update_id, message=message))
+
+    async def press(self, user: int, data: str) -> None:
+        self.update_id += 1
+        chat: Chat = Chat(id=user, type="private")
+        query: CallbackQuery = CallbackQuery(
+            id=str(self.update_id),
+            from_user=User(id=user, is_bot=False, first_name=NAMES[user]),
+            chat_instance="c",
+            data=data,
+            message=Message(message_id=1, date=datetime.now(UTC), chat=chat, text="…"),
+        )
+        await self.dp.feed_update(self.bot, Update(update_id=self.update_id, callback_query=query))
+
+    def button(self, label: str) -> str:
+        """The data of the latest button with this label."""
+        method: SendMessage
+        for method in reversed([m for m in self.session.requests if isinstance(m, SendMessage)]):
+            markup: object = method.reply_markup
+            if isinstance(markup, InlineKeyboardMarkup):
+                button: InlineKeyboardButton
+                for button in markup.inline_keyboard[0]:
+                    if button.text == label:
+                        return str(button.callback_data)
+        raise AssertionError(f"no button {label}")
 
 
 async def test_stranger_gets_nothing() -> None:
@@ -179,6 +267,70 @@ async def test_group_is_one_thread_with_authors() -> None:
         await agent.aget_state({"configurable": {"thread_id": today(GROUP)}})
     ).values["messages"]
     assert [m.text for m in history] == ["[Кирилл] фо 60к", "Записал.", "[Жена] нет, было 50", "Исправил."]
+
+
+@requires_db
+async def test_post_from_command_to_channel(sessions: async_sessionmaker[AsyncSession]) -> None:
+    await spend(sessions)
+    channel: Recording = Recording("Telegram")
+    model: ScriptedModel = scripted(AIMessage("Первый."), AIMessage("Второй."))
+    telegram: Telegram = Telegram(build_agent(scripted()), sessions, model, [channel])
+    await telegram.send(ME, "/post")
+    assert telegram.session.sent() == ["Первый.\n\n(7 знаков)"]
+    await telegram.press(ME, telegram.button("Править"))
+    prompt: str = telegram.session.sent()[-1]
+    assert prompt.startswith(ASK_COMMENT)
+    await telegram.reply(ME, prompt, "короче")
+    assert telegram.session.sent()[-1] == "Второй.\n\n(7 знаков)"
+    assert channel.posts == []
+    published: str = telegram.button("Опубликовать")
+    await telegram.press(ME, published)
+    assert channel.posts == ["Второй."]
+    assert telegram.session.sent()[-1] == "Telegram: Telegram ok"
+    await telegram.press(WIFE, published)  # an old button does not post again
+    assert channel.posts == ["Второй."]
+    assert telegram.session.sent()[-1] == "Этот пост уже закрыт."
+
+
+@requires_db
+async def test_post_failure_offers_a_retry(sessions: async_sessionmaker[AsyncSession]) -> None:
+    await spend(sessions)
+    channel: Recording = Recording("Telegram", broken=True)
+    telegram: Telegram = Telegram(build_agent(scripted()), sessions, scripted(AIMessage("Пост.")), [channel])
+    await telegram.send(ME, "/post")
+    await telegram.press(ME, telegram.button("Опубликовать"))
+    assert telegram.session.sent()[-1] == "Не вышло:\nTelegram: down"
+    channel.broken = False
+    await telegram.press(ME, telegram.button("Повторить"))
+    assert channel.posts == ["Пост."]
+
+
+@requires_db
+async def test_post_without_platforms_is_left_to_copy(sessions: async_sessionmaker[AsyncSession]) -> None:
+    await spend(sessions)
+    telegram: Telegram = Telegram(build_agent(scripted()), sessions, scripted(AIMessage("Пост.")))
+    await telegram.send(ME, "/post")
+    await telegram.press(ME, telegram.button("Опубликовать"))
+    assert telegram.session.sent()[-1].startswith("Площадки не настроены")
+
+
+@requires_db
+async def test_post_cancelled_and_stranger_cannot_press(sessions: async_sessionmaker[AsyncSession]) -> None:
+    await spend(sessions)
+    channel: Recording = Recording("Telegram")
+    telegram: Telegram = Telegram(build_agent(scripted()), sessions, scripted(AIMessage("Пост.")), [channel])
+    await telegram.send(ME, "/post")
+    await telegram.press(STRANGER, telegram.button("Опубликовать"))
+    assert channel.posts == []
+    await telegram.press(ME, telegram.button("Отмена"))
+    assert telegram.session.sent()[-1] == "Отменил."
+
+
+@requires_db
+async def test_post_with_nothing_spent(sessions: async_sessionmaker[AsyncSession]) -> None:
+    telegram: Telegram = Telegram(build_agent(scripted()), sessions)
+    await telegram.send(ME, "/post")
+    assert telegram.session.sent() == [NOTHING_TO_POST]
 
 
 @pytest.mark.parametrize(

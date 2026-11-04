@@ -1,12 +1,13 @@
 # expense-tracker
 
 A family expense tracker in Telegram. Write to the bot the way you would jot it down in a notebook —
-«фо 60к», «нет, было 50» — and an LLM agent records, corrects and summarises expenses. Once a week
-it drafts a post about how the family lives and publishes it to Threads and a Telegram channel after
-your approval.
+«фо 60к», «нет, было 50» — and an LLM agent records, corrects and summarises expenses. On `/post` it
+drafts a post about how the family's week went and publishes it to Threads and a Telegram channel
+after your approval.
 
-> **Status:** the bot records, corrects and summarises expenses through the agent; memory per chat
-> in Postgres. The posting flow and the model eval are next.
+> **Status:** in daily use since November 2026 for recording and summaries. The posting flow works
+> up to the draft on a real model and is tested against recorded platforms; publishing to Threads
+> and to a channel has not been run live yet.
 
 ## Design
 
@@ -18,9 +19,30 @@ your approval.
   6 model calls. Memory is a LangGraph thread per chat **per day**, kept by the Postgres
   checkpointer across restarts: «нет, было 50» finds today's record, while last month comes from
   SQL, not from the chat. A year of use costs no more tokens per message than the first day.
-- **Posting flow** — its own LangGraph `StateGraph`: figures → draft → pause for approval (hours,
-  surviving a restart) → edit loop → publish to each platform, retrying only the one that failed.
+  Tools report totals too, counted in SQL: the model retells them and never adds up.
+- **Posting flow** — its own LangGraph `StateGraph` (`post.py`), since a run of four calls could not
+  do this: figures (SQL, shares and changes in percent, no amounts) → draft (LLM) → pause for
+  approval, for hours and across restarts → edit loop → one platform per step, so a failure or a
+  crash never posts twice → retry only what failed. Without platform keys the bot leaves the text to
+  copy by hand.
 - **PostgreSQL** for expenses and LangGraph checkpoints alike.
+
+## Measured
+
+`uv run python -m evals.run` sends phrases through the real agent and compares what landed in the
+database with what should have: amount, currency, day, category. It costs money, so it runs by hand.
+
+| Model | Exact | Amounts | Tokens per case | Cost of a run |
+|---|---|---|---|---|
+| `claude-haiku-5-5` | 61/61 | 61/61 | 5 400 in, 206 out | $0.04 |
+
+Read that as «no misses on this set», not as 100% accuracy. The 61 phrases
+([`evals/phrases.jsonl`](evals/phrases.jsonl)) are written by hand in the style of real messages —
+real ones stay private — by the author of the prompt, and they are easy for the model: categories,
+foreign currencies, relative dates, several expenses at once, corrections, and messages where it
+must ask instead of guessing. It does not cover answers to questions such as «сколько за неделю?».
+The default Groq model has not been run: no key here yet. Raw answers are in
+[`evals/results/`](evals/results/).
 
 ## Run
 
@@ -61,6 +83,6 @@ uv run alembic revision --autogenerate -m "what changed"
 `tests/test_migrations.py` fails if a model changed without a revision.
 
 Agent tests run on a scripted model: they check tools, memory, limits and retries, not how well a
-real model understands «фо 60к» — that is the eval's job. Every
+real model understands «фо 60к» — that is [the eval's](#measured) job. Every
 variable, parameter and return value is typed: ty and `mypy --strict` check the code,
 `tests/test_annotations.py` checks that variables are annotated.

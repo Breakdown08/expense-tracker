@@ -2,24 +2,38 @@
 
 import asyncio
 import logging
+import re
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime
-from typing import Any, override
+from typing import Any, cast, override
 from zoneinfo import ZoneInfo
 
+import httpx
 from aiogram import BaseMiddleware, Bot, Dispatcher, F
-from aiogram.filters import CommandStart
-from aiogram.types import Chat, Message, TelegramObject
+from aiogram.filters import Command, CommandStart
+from aiogram.types import (
+    CallbackQuery,
+    Chat,
+    ForceReply,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+    TelegramObject,
+)
 from aiogram.utils.chat_action import ChatActionSender
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.types import Command as Resume
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from expense_tracker.agent import Agent, Context, build_agent, reply
 from expense_tracker.config import Settings
 from expense_tracker.db import make_engine, make_sessions
+from expense_tracker.platforms import publishers
+from expense_tracker.post import Action, Answer, PostContext, PostGraph, Publisher, build_post_graph, pause
 from expense_tracker.rates import BankOfRussia, RateSource
 
 log: logging.Logger = logging.getLogger(__name__)
@@ -27,9 +41,41 @@ log: logging.Logger = logging.getLogger(__name__)
 TELEGRAM_LIMIT: int = 4096  # characters in one message; Telegram rejects longer ones
 
 GREETING: str = """Пиши траты как в тетрадку: «фо 60к», «grab 45k, кофе вчера 35к».
-Поправить: «нет, было 50». Спросить: «сколько за неделю?», «что записано сегодня»."""
+Поправить: «нет, было 50». Спросить: «сколько за неделю?», «что записано сегодня».
+/post — пост о неделе: сначала покажу черновик, без твоей кнопки ничего не выйдет."""
 
 FAILED: str = "Модель не ответила. Попробуй позже; что успело записаться — спроси «что записано сегодня»."
+
+
+NOTHING_TO_POST: str = "За неделю нет трат в VND: писать пост не о чем."
+ASK_COMMENT: str = "Что поправить в посте?"
+POST_MARK: re.Pattern[str] = re.compile(r"\[(post:\S+)\]")
+
+
+def post_config(post: str) -> RunnableConfig:
+    return {"configurable": {"thread_id": post}}
+
+
+def buttons(post: str, *choices: tuple[str, Action]) -> InlineKeyboardMarkup:
+    """The flow's id travels in the button: a post waiting since yesterday still finds its thread."""
+    row: list[InlineKeyboardButton] = [
+        InlineKeyboardButton(text=label, callback_data=f"{action}|{post}") for label, action in choices
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=[row])
+
+
+def finished(state: dict[str, Any], platforms: list[Publisher]) -> str:
+    """The closing line once the flow has ended; the draft above it stays in the chat."""
+    if state.get("action") == "cancel":
+        return "Отменил."
+    if not state.get("figures"):
+        return NOTHING_TO_POST
+    if not platforms:
+        return "Площадки не настроены: скопируй текст выше и опубликуй сам."
+    done: dict[str, str] = state.get("published", {})
+    lines: list[str] = [f"{name}: {where}" for name, where in done.items()] or ["Ничего не вышло."]
+    failed: dict[str, str] = state.get("failed", {})
+    return "\n".join([*lines, *(f"{name}: не вышло, {why}" for name, why in failed.items())])
 
 
 def signed(message: Message) -> str:
@@ -86,13 +132,84 @@ class InTurn(BaseMiddleware):
 
 
 def build_dispatcher(
-    settings: Settings, agent: Agent, sessions: async_sessionmaker[AsyncSession], rates: RateSource
+    settings: Settings,
+    agent: Agent,
+    sessions: async_sessionmaker[AsyncSession],
+    rates: RateSource,
+    post_graph: PostGraph,
+    model: BaseChatModel,
+    platforms: list[Publisher],
 ) -> Dispatcher:
     dp: Dispatcher = Dispatcher()
     dp.update.outer_middleware(InTurn())  # after aiogram's own, which sets event_chat
     # Messages from anyone outside the whitelist are dropped without a reply.
     dp.message.filter(F.from_user.id.in_(settings.allowed_user_ids))
+    dp.callback_query.filter(F.from_user.id.in_(settings.allowed_user_ids))
     zone: ZoneInfo = ZoneInfo(settings.timezone)
+
+    def post_context() -> PostContext:
+        return PostContext(
+            sessions=sessions, model=model, publishers=platforms, today=datetime.now(zone).date()
+        )
+
+    async def advance(message: Message, post: str, step: object) -> None:
+        """Run the flow up to its next pause and show that pause, or how it ended."""
+        config: RunnableConfig = post_config(post)
+        try:
+            async with ChatActionSender.typing(message.chat.id, cast(Bot, message.bot)):
+                await post_graph.ainvoke(cast(Any, step), config, context=post_context())
+        except Exception:
+            log.exception("post flow failed")
+            await message.answer("Сценарий поста сорвался. Запусти /post заново.")
+            return
+        waiting: dict[str, Any] | None = await pause(post_graph, config)
+        if waiting is None:
+            state: dict[str, Any] = (await post_graph.aget_state(config)).values
+            await message.answer(finished(state, platforms))
+        elif waiting["step"] == "review":
+            draft: str = waiting["draft"]
+            await message.answer(
+                f"{draft}\n\n({len(draft)} знаков)",
+                reply_markup=buttons(
+                    post, ("Опубликовать", "publish"), ("Править", "edit"), ("Отмена", "cancel")
+                ),
+            )
+        else:
+            failed: str = "\n".join(f"{name}: {why}" for name, why in waiting["failed"].items())
+            await message.answer(
+                f"Не вышло:\n{failed}",
+                reply_markup=buttons(post, ("Повторить", "retry"), ("Хватит", "stop")),
+            )
+
+    @dp.message(Command("post"))
+    async def on_post(message: Message) -> None:
+        post: str = f"post:{message.chat.id}:{message.message_id}"
+        await advance(message, post, {})
+
+    @dp.callback_query(F.data.regexp(r"^(publish|edit|cancel|retry|stop)\|post:"))
+    async def on_post_button(query: CallbackQuery) -> None:
+        assert query.data is not None and isinstance(query.message, Message)
+        action: str
+        post: str
+        action, post = query.data.split("|", 1)
+        await query.answer()
+        await query.message.edit_reply_markup(reply_markup=None)  # one press, one decision
+        if await pause(post_graph, post_config(post)) is None:
+            await query.message.answer("Этот пост уже закрыт.")
+        elif action == "edit":
+            await query.message.answer(f"{ASK_COMMENT} [{post}]", reply_markup=ForceReply())
+        else:
+            await advance(query.message, post, Resume(resume=Answer(action=cast(Action, action))))
+
+    @dp.message(F.text, F.reply_to_message.text.contains(ASK_COMMENT))
+    async def on_post_comment(message: Message) -> None:
+        assert message.reply_to_message is not None and message.reply_to_message.text is not None
+        mark: re.Match[str] | None = POST_MARK.search(message.reply_to_message.text)
+        if mark is None or await pause(post_graph, post_config(mark[1])) is None:
+            await message.answer("Этот пост уже закрыт.")
+            return
+        answer: Answer = Answer(action="edit", comment=message.text or "")
+        await advance(message, mark[1], Resume(resume=answer))
 
     @dp.message(CommandStart())
     async def on_start(message: Message) -> None:
@@ -135,7 +252,20 @@ async def run(settings: Settings) -> None:
         agent: Agent = build_agent(model, saver)
         log.info("model %s", settings.llm_model)
         bot: Bot = Bot(settings.telegram_bot_token.get_secret_value())
-        try:
-            await build_dispatcher(settings, agent, make_sessions(engine), BankOfRussia()).start_polling(bot)
-        finally:
-            await engine.dispose()
+        client: httpx.AsyncClient
+        async with httpx.AsyncClient(timeout=30) as client:
+            platforms: list[Publisher] = publishers(settings, bot, client)
+            log.info("post platforms: %s", [p.name for p in platforms])
+            dispatcher: Dispatcher = build_dispatcher(
+                settings,
+                agent,
+                make_sessions(engine),
+                BankOfRussia(),
+                build_post_graph(saver),
+                model,
+                platforms,
+            )
+            try:
+                await dispatcher.start_polling(bot)
+            finally:
+                await engine.dispose()
