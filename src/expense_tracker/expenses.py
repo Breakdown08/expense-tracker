@@ -6,7 +6,7 @@ from enum import StrEnum
 from typing import Self
 
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import Row, Select, TextClause, select, text
+from sqlalchemy import Row, Select, TextClause, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from expense_tracker.models import Expense
@@ -90,13 +90,30 @@ async def edit_expense(session: AsyncSession, expense_id: int, changes: ExpenseC
     return row
 
 
-async def delete_expense(session: AsyncSession, expense_id: int) -> bool:
+async def delete_expense(session: AsyncSession, expense_id: int) -> date | None:
+    """The day the expense was on, None if there was no such expense."""
     row: Expense | None = await session.get(Expense, expense_id)
     if row is None:
-        return False
+        return None
+    day: date = row.spent_on
     await session.delete(row)
     await session.commit()
-    return True
+    return day
+
+
+async def day_totals(session: AsyncSession, day: date) -> dict[str, Decimal]:
+    """Each currency's total for one day."""
+    rows: list[Row[str, Decimal]] = list(
+        (
+            await session.execute(
+                select(Expense.currency, func.sum(Expense.amount))
+                .where(Expense.spent_on == day)
+                .group_by(Expense.currency)
+                .order_by(Expense.currency)
+            )
+        ).all()
+    )
+    return {currency: total for currency, total in rows}
 
 
 async def list_expenses(

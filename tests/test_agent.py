@@ -6,7 +6,7 @@ from decimal import Decimal
 import groq
 import httpx
 import pytest
-from langchain_core.messages import AIMessage, BaseMessage, ToolCall
+from langchain_core.messages import AIMessage, BaseMessage, ToolCall, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -172,6 +172,74 @@ async def test_a_new_day_starts_a_new_history(sessions: async_sessionmaker[Async
     ).values["messages"]
     assert [m.text for m in history][0] == "что было вчера?"  # nothing of yesterday's turn
     assert "фо" in str(history[2].content)  # the answer came from the database
+
+
+async def tool_answers(
+    sessions: async_sessionmaker[AsyncSession], *steps: tuple[str, AIMessage]
+) -> list[str]:
+    """What the tools told the model, one per step, in one chat."""
+    script: list[AIMessage] = []
+    step: tuple[str, AIMessage]
+    for step in steps:
+        script += [step[1], AIMessage("Готово.")]
+    agent: Agent = build_agent(scripted(*script), InMemorySaver())
+    for step in steps:
+        await reply(agent, CHAT, step[0], context(sessions))
+    history: list[BaseMessage] = (
+        await agent.aget_state({"configurable": {"thread_id": thread(CHAT, TODAY)}})
+    ).values["messages"]
+    return [str(m.content) for m in history if isinstance(m, ToolMessage)]
+
+
+async def test_totals_after_a_record_come_from_the_code(sessions: async_sessionmaker[AsyncSession]) -> None:
+    """The message's total and the day's: earlier today counts for the day, not for the message."""
+    answers: list[str] = await tool_answers(
+        sessions,
+        ("фо 60к", call("add_expenses", {"items": [{"amount": 60000, "category": "eating_out"}]})),
+        (
+            "кофе 35к, билет 12.5$, вчера грэб 45к",
+            call(
+                "add_expenses",
+                {
+                    "items": [
+                        {"amount": 35000, "category": "eating_out"},
+                        {"amount": "12.50", "currency": "USD", "category": "travel"},
+                        {"amount": 45000, "category": "transport", "spent_on": "2026-11-01"},
+                    ]
+                },
+                id="c2",
+            ),
+        ),
+    )
+    assert answers[0].splitlines()[-1] == "Total for 2026-11-02: 60 000 VND"
+    assert "this message" not in answers[0]  # one line is its own total
+    assert answers[1].splitlines()[-3:] == [
+        "Total of this message: 12.50 USD, 80 000 VND",
+        "Total for 2026-11-01: 45 000 VND",
+        "Total for 2026-11-02: 12.50 USD, 95 000 VND",
+    ]
+
+
+async def test_totals_after_a_correction_and_a_deletion(sessions: async_sessionmaker[AsyncSession]) -> None:
+    add: AIMessage = call(
+        "add_expenses",
+        {"items": [{"amount": 60000, "category": "eating_out"}, {"amount": 35000, "category": "eating_out"}]},
+    )
+    first: list[str] = await tool_answers(sessions, ("фо 60к, кофе 35к", add))
+    assert first[0].endswith("Total for 2026-11-02: 95 000 VND")
+    rows: list[Expense] = await recorded(sessions)
+    edit: AIMessage = call("edit_expense", {"expense_id": rows[0].id, "changes": {"amount": 50000}})
+    assert (await tool_answers(sessions, ("нет, было 50", edit)))[0].endswith(
+        "Total for 2026-11-02: 85 000 VND"
+    )
+    remove: AIMessage = call("delete_expense", {"expense_id": rows[1].id})
+    assert (await tool_answers(sessions, ("кофе не было", remove)))[0].endswith(
+        "Total for 2026-11-02: 50 000 VND"
+    )
+    remove = call("delete_expense", {"expense_id": rows[0].id})
+    assert (await tool_answers(sessions, ("и фо", remove)))[0].endswith("Total for 2026-11-02: 0")
+    remove = call("delete_expense", {"expense_id": rows[0].id})
+    assert (await tool_answers(sessions, ("ещё раз", remove)))[0] == f"No expense #{rows[0].id}"
 
 
 async def summary_answer(sessions: async_sessionmaker[AsyncSession], rates: FixedRates) -> str:

@@ -84,8 +84,8 @@ async def test_edit_changes_only_given_fields(session: AsyncSession) -> None:
 @requires_db
 async def test_delete(session: AsyncSession) -> None:
     row: Expense = (await add_expenses(session, ME, [spent("10000", Category.OTHER, date(2026, 11, 3))]))[0]
-    assert await delete_expense(session, row.id)
-    assert not await delete_expense(session, row.id)
+    assert await delete_expense(session, row.id) == date(2026, 11, 3)
+    assert await delete_expense(session, row.id) is None
     assert await list_expenses(session, WEEK) == []
 
 

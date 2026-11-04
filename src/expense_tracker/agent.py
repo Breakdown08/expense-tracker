@@ -72,6 +72,14 @@ def line(row: Expense) -> str:
     return f"#{row.id} {row.spent_on} {money(row.amount)} {row.currency} {row.category}{note}"
 
 
+def amounts(totals: dict[str, Decimal]) -> str:
+    return ", ".join(f"{money(total)} {currency}" for currency, total in sorted(totals.items())) or "0"
+
+
+async def day_line(session: AsyncSession, day: date) -> str:
+    return f"Total for {day}: {amounts(await expenses.day_totals(session, day))}"
+
+
 def grand_total(totals: list[CategoryTotal], rates: Rates | None) -> list[str]:
     """Every currency's total, then all of them in VND and RUB at the latest rate — counted here, not by
     the model. Without rates the per-currency totals still stand."""
@@ -117,7 +125,15 @@ async def add_expenses(items: list[ExpenseInput], runtime: ToolRuntime[Context])
     session: AsyncSession
     async with ctx.sessions() as session:
         rows: list[Expense] = await expenses.add_expenses(session, ctx.user_id, new)
-    return "Recorded:\n" + "\n".join(line(r) for r in rows)
+        days: list[str] = [await day_line(session, day) for day in sorted({r.spent_on for r in rows})]
+    recorded: list[str] = [line(r) for r in rows]
+    if len(rows) > 1:
+        message: dict[str, Decimal] = {}
+        row: Expense
+        for row in rows:
+            message[row.currency] = message.get(row.currency, Decimal(0)) + row.amount
+        recorded.append(f"Total of this message: {amounts(message)}")
+    return "\n".join(["Recorded:", *recorded, *days])
 
 
 @tool
@@ -126,7 +142,9 @@ async def edit_expense(expense_id: int, changes: ExpenseChanges, runtime: ToolRu
     session: AsyncSession
     async with runtime.context.sessions() as session:
         row: Expense | None = await expenses.edit_expense(session, expense_id, changes)
-    return f"Updated: {line(row)}" if row else f"No expense #{expense_id}"
+        if row is None:
+            return f"No expense #{expense_id}"
+        return f"Updated: {line(row)}\n{await day_line(session, row.spent_on)}"
 
 
 @tool
@@ -134,8 +152,10 @@ async def delete_expense(expense_id: int, runtime: ToolRuntime[Context]) -> str:
     """Delete a recorded expense by its #id."""
     session: AsyncSession
     async with runtime.context.sessions() as session:
-        deleted: bool = await expenses.delete_expense(session, expense_id)
-    return f"Deleted #{expense_id}" if deleted else f"No expense #{expense_id}"
+        day: date | None = await expenses.delete_expense(session, expense_id)
+        if day is None:
+            return f"No expense #{expense_id}"
+        return f"Deleted #{expense_id}\n{await day_line(session, day)}"
 
 
 @tool
@@ -201,7 +221,8 @@ Don't repeat the tag in replies; anyone may correct anyone's expense.
 - «нет, было 50» corrects the expense just recorded: use its #id from the tool result.
 - The chat history holds only today's messages. Anything earlier — yesterday, last month — \
 comes from list_expenses or summary, never from memory.
-- Never compute totals yourself: use summary or list_expenses and retell their numbers.
+- Never compute totals yourself: retell the totals add_expenses, edit_expense and delete_expense \
+report, otherwise use summary or list_expenses.
 - «Сколько потратили» is answered from summary with the total both in VND and in RUB, and the rate's date. \
 Past expenses convert at the latest rate, not at the rate of their day. \
 For any other conversion use convert; never convert currencies yourself.
