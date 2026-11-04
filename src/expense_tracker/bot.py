@@ -5,7 +5,7 @@ import logging
 import re
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, cast, override
 from zoneinfo import ZoneInfo
 
@@ -13,6 +13,7 @@ import httpx
 from aiogram import BaseMiddleware, Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
 from aiogram.types import (
+    BotCommand,
     CallbackQuery,
     Chat,
     ForceReply,
@@ -35,19 +36,29 @@ from expense_tracker.db import make_engine, make_sessions
 from expense_tracker.platforms import publishers
 from expense_tracker.post import Action, Answer, PostContext, PostGraph, Publisher, build_post_graph, pause
 from expense_tracker.rates import BankOfRussia, RateSource
+from expense_tracker.reports import report, week_start
 
 log: logging.Logger = logging.getLogger(__name__)
 
 TELEGRAM_LIMIT: int = 4096  # characters in one message; Telegram rejects longer ones
 
 GREETING: str = """Пиши траты как в тетрадку: «фо 60к», «grab 45k, кофе вчера 35к».
-Поправить: «нет, было 50». Спросить: «сколько за неделю?», «что записано сегодня».
-/post — пост о неделе: сначала покажу черновик, без твоей кнопки ничего не выйдет."""
+Поправить: «нет, было 50». Спросить своими словами: «сколько в среду?».
+/сегодня, /вчера, /неделя — сводка с итогом в донгах и рублях.
+/отчёт — пост о последних 30 днях: сначала покажу черновик, без твоей кнопки ничего не выйдет."""
+
+# Telegram's command menu takes Latin names only, so each command has one for the menu.
+MENU: list[BotCommand] = [
+    BotCommand(command="today", description="Траты за сегодня"),
+    BotCommand(command="yesterday", description="Траты за вчера"),
+    BotCommand(command="week", description="Траты с понедельника"),
+    BotCommand(command="report", description="Отчёт за месяц и пост"),
+]
 
 FAILED: str = "Модель не ответила. Попробуй позже; что успело записаться — спроси «что записано сегодня»."
 
 
-NOTHING_TO_POST: str = "За неделю нет трат в VND: писать пост не о чем."
+NOTHING_TO_POST: str = "За 30 дней нет трат в VND: писать пост не о чем."
 ASK_COMMENT: str = "Что поправить в посте?"
 POST_MARK: re.Pattern[str] = re.compile(r"\[(post:\S+)\]")
 
@@ -160,7 +171,7 @@ def build_dispatcher(
                 await post_graph.ainvoke(cast(Any, step), config, context=post_context())
         except Exception:
             log.exception("post flow failed")
-            await message.answer("Сценарий поста сорвался. Запусти /post заново.")
+            await message.answer("Сценарий поста сорвался. Запусти /отчёт заново.")
             return
         waiting: dict[str, Any] | None = await pause(post_graph, config)
         if waiting is None:
@@ -181,7 +192,28 @@ def build_dispatcher(
                 reply_markup=buttons(post, ("Повторить", "retry"), ("Хватит", "stop")),
             )
 
-    @dp.message(Command("post"))
+    async def send_report(message: Message, start: date, end: date, today: date) -> None:
+        part: str
+        for part in chunks(await report(sessions, rates, today, start, end)):
+            await message.answer(part)
+
+    @dp.message(Command("сегодня", "today", ignore_case=True))
+    async def on_today(message: Message) -> None:
+        today: date = datetime.now(zone).date()
+        await send_report(message, today, today, today)
+
+    @dp.message(Command("вчера", "yesterday", ignore_case=True))
+    async def on_yesterday(message: Message) -> None:
+        today: date = datetime.now(zone).date()
+        yesterday: date = today - timedelta(days=1)
+        await send_report(message, yesterday, yesterday, today)
+
+    @dp.message(Command("неделя", "week", ignore_case=True))
+    async def on_week(message: Message) -> None:
+        today: date = datetime.now(zone).date()
+        await send_report(message, week_start(today), today, today)
+
+    @dp.message(Command("отчёт", "отчет", "report", ignore_case=True))
     async def on_post(message: Message) -> None:
         post: str = f"post:{message.chat.id}:{message.message_id}"
         await advance(message, post, {})
@@ -252,6 +284,7 @@ async def run(settings: Settings) -> None:
         agent: Agent = build_agent(model, saver)
         log.info("model %s", settings.llm_model)
         bot: Bot = Bot(settings.telegram_bot_token.get_secret_value())
+        await bot.set_my_commands(MENU)
         client: httpx.AsyncClient
         async with httpx.AsyncClient(timeout=30) as client:
             platforms: list[Publisher] = publishers(settings, bot, client)

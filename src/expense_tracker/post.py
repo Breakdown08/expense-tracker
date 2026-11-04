@@ -1,4 +1,4 @@
-"""The weekly post: a LangGraph `StateGraph`, because a straight run of calls could not do this.
+"""The monthly report post: a LangGraph `StateGraph`, because a straight run of calls could not do this.
 
 figures (SQL) → draft (LLM) → pause for a person, for hours, across restarts → edit loop → publish
 one platform per step, so a crash or a failure never posts twice → retry only what failed.
@@ -21,6 +21,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from expense_tracker import expenses
 from expense_tracker.expenses import CategoryTotal, Period
+from expense_tracker.reports import price
+
+DAYS: int = 30  # always a whole month, whatever day the report is asked for
 
 type Action = Literal["publish", "edit", "cancel", "retry", "stop"]
 
@@ -58,14 +61,14 @@ class PostContext:
 
 
 PROMPT: str = """You write a short post in Russian for Threads about how a family lives in Vietnam, \
-from one week of their expenses. Plain and personal, no hashtags, no emoji chains, under 450 characters.
+from one month of their expenses. Plain and personal, no hashtags, no emoji chains, under 450 characters.
 Use only the figures you are given, as they are: amounts in Vietnamese dong, shares and changes in \
 percent. Keep the amounts in dong, do not convert them. Never invent amounts, places or events. \
 Reply with the post alone."""
 
 
 def dong(amount: Decimal) -> str:
-    return f"{amount:,.0f}".replace(",", " ") + " ₫"
+    return price(amount, "VND")
 
 
 def percent(part: Decimal, whole: Decimal) -> int:
@@ -86,8 +89,8 @@ def describe(totals: list[CategoryTotal], period: Period) -> str:
     before: Decimal = sum((t.previous_total for t in totals if t.currency == "VND"), Decimal(0))
     last: date = period.end - timedelta(days=1)
     lines: list[str] = [
-        f"Week {period.start} .. {last}",
-        f"Total: {dong(now)}, {change(now, before)} compared to the week before",
+        f"Days {period.start} .. {last}",
+        f"Total: {dong(now)}, {change(now, before)} compared to the {DAYS} days before",
     ]
     t: CategoryTotal
     for t in rows:
@@ -100,11 +103,11 @@ def describe(totals: list[CategoryTotal], period: Period) -> str:
 
 async def figures(state: PostState, runtime: Runtime[PostContext]) -> PostState:
     ctx: PostContext = runtime.context
-    week: Period = Period(start=ctx.today - timedelta(days=6), end=ctx.today + timedelta(days=1))
+    month: Period = Period(start=ctx.today - timedelta(days=DAYS - 1), end=ctx.today + timedelta(days=1))
     session: AsyncSession
     async with ctx.sessions() as session:
-        totals: list[CategoryTotal] = await expenses.summary(session, week)
-    return {"figures": describe(totals, week), "published": {}, "failed": {}}
+        totals: list[CategoryTotal] = await expenses.summary(session, month)
+    return {"figures": describe(totals, month), "published": {}, "failed": {}}
 
 
 async def write_draft(state: PostState, runtime: Runtime[PostContext]) -> PostState:

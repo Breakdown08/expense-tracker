@@ -57,8 +57,8 @@ def test_figures_have_dong_amounts_and_shares() -> None:
         week,
     )
     assert text.splitlines() == [
-        "Week 2026-11-02 .. 2026-11-08",
-        "Total: 1 000 000 ₫, +0% compared to the week before",
+        "Days 2026-11-02 .. 2026-11-08",
+        "Total: 1 000 000 ₫, +0% compared to the 30 days before",
         "groceries: 750 000 ₫, 75% of spending, +50%",
         "health: 250 000 ₫, 25% of spending, not there before",
     ]

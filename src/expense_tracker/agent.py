@@ -1,8 +1,9 @@
 """Expense agent: LangChain `create_agent` with tools over `expenses.py`. It knows nothing of posts."""
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 from typing import Any, override
 
@@ -24,7 +25,7 @@ from langchain.agents.middleware import (
 from langchain.agents.middleware.model_call_limit import ModelCallLimitState
 from langchain.tools import ToolRuntime, tool
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
@@ -32,10 +33,11 @@ from langgraph.types import Checkpointer
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from expense_tracker import expenses
-from expense_tracker.expenses import Category, CategoryTotal, ExpenseChanges, NewExpense, Period
+from expense_tracker import expenses, reports
+from expense_tracker.expenses import Category, CategoryTotal, ExpenseChanges, NewExpense
 from expense_tracker.models import Expense
 from expense_tracker.rates import Rates, RateSource, UnknownCurrency
+from expense_tracker.reports import ONE, entry, latest_rates, money, period, prices
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -58,26 +60,13 @@ class ExpenseInput(BaseModel):
     spent_on: date | None = Field(default=None, description="Omit for today")
 
 
-ONE: Decimal = Decimal(1)  # quantize to whole units: round() would return an int
-
-
-def money(amount: Decimal) -> str:
-    """60 000, 12.50: spaces between thousands, cents only when there are any."""
-    places: str = ",.0f" if amount == amount.to_integral_value() else ",.2f"
-    return format(amount, places).replace(",", " ")
-
-
 def line(row: Expense) -> str:
     note: str = f" «{row.note}»" if row.note else ""
     return f"#{row.id} {row.spent_on} {money(row.amount)} {row.currency} {row.category}{note}"
 
 
-def amounts(totals: dict[str, Decimal]) -> str:
-    return ", ".join(f"{money(total)} {currency}" for currency, total in sorted(totals.items())) or "0"
-
-
 async def day_line(session: AsyncSession, day: date) -> str:
-    return f"Total for {day}: {amounts(await expenses.day_totals(session, day))}"
+    return f"За {reports.day_name(day)}: {prices(await expenses.day_totals(session, day))}"
 
 
 def grand_total(totals: list[CategoryTotal], rates: Rates | None) -> list[str]:
@@ -109,11 +98,6 @@ def grand_total(totals: list[CategoryTotal], rates: Rates | None) -> list[str]:
     return lines
 
 
-def period(start: date, end: date) -> Period:
-    """The model names both days inclusively, as people do; Period ends the day after."""
-    return Period(start=start, end=end + timedelta(days=1))
-
-
 @tool
 async def add_expenses(items: list[ExpenseInput], runtime: ToolRuntime[Context]) -> str:
     """Record one or more expenses from a single message, all in one call."""
@@ -126,14 +110,14 @@ async def add_expenses(items: list[ExpenseInput], runtime: ToolRuntime[Context])
     async with ctx.sessions() as session:
         rows: list[Expense] = await expenses.add_expenses(session, ctx.user_id, new)
         days: list[str] = [await day_line(session, day) for day in sorted({r.spent_on for r in rows})]
-    recorded: list[str] = [line(r) for r in rows]
+    recorded: list[str] = [entry(r) for r in rows]
     if len(rows) > 1:
         message: dict[str, Decimal] = {}
         row: Expense
         for row in rows:
             message[row.currency] = message.get(row.currency, Decimal(0)) + row.amount
-        recorded.append(f"Total of this message: {amounts(message)}")
-    return "\n".join(["Recorded:", *recorded, *days])
+        recorded.append(f"Всего в сообщении: {prices(message)}")
+    return "\n".join(["Записал:", *recorded, *days])
 
 
 @tool
@@ -143,8 +127,8 @@ async def edit_expense(expense_id: int, changes: ExpenseChanges, runtime: ToolRu
     async with runtime.context.sessions() as session:
         row: Expense | None = await expenses.edit_expense(session, expense_id, changes)
         if row is None:
-            return f"No expense #{expense_id}"
-        return f"Updated: {line(row)}\n{await day_line(session, row.spent_on)}"
+            return f"Нет записи #{expense_id}"
+        return f"Исправил: {entry(row)}\n{await day_line(session, row.spent_on)}"
 
 
 @tool
@@ -154,8 +138,8 @@ async def delete_expense(expense_id: int, runtime: ToolRuntime[Context]) -> str:
     async with runtime.context.sessions() as session:
         day: date | None = await expenses.delete_expense(session, expense_id)
         if day is None:
-            return f"No expense #{expense_id}"
-        return f"Deleted #{expense_id}\n{await day_line(session, day)}"
+            return f"Нет записи #{expense_id}"
+        return f"Удалил #{expense_id}\n{await day_line(session, day)}"
 
 
 @tool
@@ -170,20 +154,24 @@ async def list_expenses(
 
 
 @tool
+async def report(start: date, end: date, runtime: ToolRuntime[Context]) -> str:
+    """What was spent from start to end (both included), with the total in VND and RUB. Reaches the user
+    word for word."""
+    ctx: Context = runtime.context
+    return await reports.report(ctx.sessions, ctx.rates, ctx.today, start, end)
+
+
+@tool
 async def summary(start: date, end: date, runtime: ToolRuntime[Context]) -> str:
-    """Totals per category from start to end (both included), next to the same number of days before."""
+    """Totals per category from start to end (both included), next to the same number of days before.
+    For you to analyse; for a plain total use report."""
     ctx: Context = runtime.context
     session: AsyncSession
     async with ctx.sessions() as session:
         totals: list[CategoryTotal] = await expenses.summary(session, period(start, end))
     if not totals:
         return "No expenses"
-    rates: Rates | None
-    try:
-        rates = await ctx.rates.latest(ctx.today)
-    except Exception:
-        log.warning("no exchange rates for the summary", exc_info=True)
-        rates = None
+    rates: Rates | None = await latest_rates(ctx.rates, ctx.today)
     categories: list[str] = [
         f"{t.category} {t.currency}: {money(t.total)} ({t.count}), before {money(t.previous_total)}"
         for t in totals
@@ -199,20 +187,31 @@ async def convert(amount: Decimal, currency: str, runtime: ToolRuntime[Context],
         rates: Rates = await ctx.rates.latest(ctx.today)
         result: Decimal = rates.convert(amount, currency.upper(), to.upper())
     except UnknownCurrency as error:
-        return f"The Bank of Russia has no rate for {error}"
+        return f"У ЦБ нет курса {error}"
     except Exception:
         log.warning("no exchange rates for convert", exc_info=True)
-        return "Exchange rates are unavailable now"
+        return "Курсы сейчас недоступны"
     return (
         f"{money(amount)} {currency.upper()} = {money(result.quantize(Decimal('0.01')))} {to.upper()} "
-        f"(Bank of Russia, {rates.on:%d.%m.%Y})"
+        f"(ЦБ, {rates.on:%d.%m.%Y})"
     )
 
 
-TOOLS: list[BaseTool] = [add_expenses, edit_expense, delete_expense, list_expenses, summary, convert]
+TOOLS: list[BaseTool] = [
+    add_expenses,
+    edit_expense,
+    delete_expense,
+    list_expenses,
+    report,
+    summary,
+    convert,
+]
+
+# Their result is the answer: no second model call to retell it.
+DIRECT: frozenset[str] = frozenset({"add_expenses", "edit_expense", "delete_expense", "report", "convert"})
 
 PROMPT: str = """You keep a family's expense book in Telegram. The family lives in Vietnam and pays in VND \
-unless they name another currency. Today is {today}.
+unless they name another currency. Today is {today:%A, %Y-%m-%d}.
 
 - Two people share one chat and one wallet. Each message starts with its author: «[Кирилл] фо 60к». \
 Don't repeat the tag in replies; anyone may correct anyone's expense.
@@ -221,9 +220,12 @@ Don't repeat the tag in replies; anyone may correct anyone's expense.
 - «нет, было 50» corrects the expense just recorded: use its #id from the tool result.
 - The chat history holds only today's messages. Anything earlier — yesterday, last month — \
 comes from list_expenses or summary, never from memory.
-- Never compute totals yourself: retell the totals add_expenses, edit_expense and delete_expense \
-report, otherwise use summary or list_expenses.
-- «Сколько потратили» is answered from summary with the total both in VND and in RUB, and the rate's date. \
+- The results of add_expenses, edit_expense, delete_expense, report and convert go to the user as they \
+are and end your turn, so when one message asks for several things make all the calls at once.
+- «Сколько потратили», «что записано» for a day or a period is report: the user gets it word for word. \
+«Неделя» without a date means from this week's Monday to today. \
+Use summary or list_expenses only when the answer takes more than a total: comparing periods, one category, \
+what grew, the total in another currency than VND and RUB. Then never compute totals yourself. \
 Past expenses convert at the latest rate, not at the rate of their day. \
 For any other conversion use convert; never convert currencies yourself.
 - Categories: groceries — food and drinks from shops and markets; eating_out — cafés, restaurants, \
@@ -237,7 +239,7 @@ leisure — entertainment, hobbies, gifts; travel — trips, tickets, hotels; ot
 
 @dynamic_prompt
 def system_prompt(request: ModelRequest[Context]) -> str:
-    return PROMPT.format(today=request.runtime.context.today.isoformat())
+    return PROMPT.format(today=request.runtime.context.today)
 
 
 # Worth retrying: rate limits (Groq free tier: 8K tokens a minute), network, provider 5xx.
@@ -257,6 +259,17 @@ LIMIT_REACHED: str = (
 )
 
 
+def tool_results(messages: Sequence[BaseMessage]) -> list[ToolMessage]:
+    """The tool messages that close the history, in order."""
+    results: list[ToolMessage] = []
+    message: BaseMessage
+    for message in reversed(messages):
+        if not isinstance(message, ToolMessage):
+            break
+        results.insert(0, message)
+    return results
+
+
 class CallLimit(ModelCallLimitMiddleware[Any, Context]):
     """LangChain's limit, with the reason in the family's language instead of «Model call limits exceeded»."""
 
@@ -271,6 +284,22 @@ class CallLimit(ModelCallLimitMiddleware[Any, Context]):
         return update
 
 
+class DirectAnswer(AgentMiddleware[Any, Context]):
+    """Ends the turn before the model is called again when the tools have already answered.
+
+    Not `return_direct`: that also ends the turn on a tool error, and a wrong argument has to go back
+    to the model to be fixed, not to the chat.
+    """
+
+    @hook_config(can_jump_to=["end"])
+    @override
+    def before_model(self, state: AgentState[Any], runtime: Runtime[Context]) -> dict[str, Any] | None:
+        results: list[ToolMessage] = tool_results(state["messages"])
+        if results and all(m.name in DIRECT and m.status != "error" for m in results):
+            return {"jump_to": "end"}
+        return None
+
+
 # As create_agent declares its result. ty 0.0.95 does not see that a TypedDict class has
 # __optional_keys__ and rejects the bound; mypy and the runtime agree it is there.
 type Agent = CompiledStateGraph[AgentState[None], Context, InputAgentState, OutputAgentState[None]]  # ty: ignore[invalid-type-arguments]
@@ -280,6 +309,7 @@ def build_agent(model: BaseChatModel, checkpointer: Checkpointer = None, retry_d
     # Any: AgentMiddleware is invariant in its state, so LangChain's own limit middlewares (each with
     # its own state type) do not fit create_agent's list under mypy without widening it here.
     chain: list[AgentMiddleware[Any, Context]] = [
+        DirectAnswer(),
         system_prompt,
         ModelRetryMiddleware(retry_on=TRANSIENT, max_retries=3, initial_delay=retry_delay, max_delay=30.0),
         CallLimit(run_limit=6),  # one message never loops for long
@@ -303,6 +333,9 @@ async def reply(agent: Agent, chat_id: int, text: str, context: Context) -> str:
     )
     messages: object = result["messages"]
     assert isinstance(messages, list)
+    direct: list[ToolMessage] = tool_results(messages)
+    if direct:
+        return "\n\n".join(m.text for m in direct)
     last: object = messages[-1]
     assert isinstance(last, AIMessage)
     return last.text  # text blocks only: gpt-oss reasoning stays out of Telegram

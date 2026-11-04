@@ -116,7 +116,7 @@ def local_day() -> date:
 
 
 async def spend(sessions: async_sessionmaker[AsyncSession]) -> None:
-    """Something for this week's post: the flow's date is the real one here."""
+    """Something for this month's report: the flow's date is the real one here."""
     session: AsyncSession
     async with sessions() as session:
         item: NewExpense = NewExpense(
@@ -275,7 +275,7 @@ async def test_post_from_command_to_channel(sessions: async_sessionmaker[AsyncSe
     channel: Recording = Recording("Telegram")
     model: ScriptedModel = scripted(AIMessage("Первый."), AIMessage("Второй."))
     telegram: Telegram = Telegram(build_agent(scripted()), sessions, model, [channel])
-    await telegram.send(ME, "/post")
+    await telegram.send(ME, "/отчёт")
     assert telegram.session.sent() == ["Первый.\n\n(7 знаков)"]
     await telegram.press(ME, telegram.button("Править"))
     prompt: str = telegram.session.sent()[-1]
@@ -297,7 +297,7 @@ async def test_post_failure_offers_a_retry(sessions: async_sessionmaker[AsyncSes
     await spend(sessions)
     channel: Recording = Recording("Telegram", broken=True)
     telegram: Telegram = Telegram(build_agent(scripted()), sessions, scripted(AIMessage("Пост.")), [channel])
-    await telegram.send(ME, "/post")
+    await telegram.send(ME, "/отчёт")
     await telegram.press(ME, telegram.button("Опубликовать"))
     assert telegram.session.sent()[-1] == "Не вышло:\nTelegram: down"
     channel.broken = False
@@ -309,7 +309,7 @@ async def test_post_failure_offers_a_retry(sessions: async_sessionmaker[AsyncSes
 async def test_post_without_platforms_is_left_to_copy(sessions: async_sessionmaker[AsyncSession]) -> None:
     await spend(sessions)
     telegram: Telegram = Telegram(build_agent(scripted()), sessions, scripted(AIMessage("Пост.")))
-    await telegram.send(ME, "/post")
+    await telegram.send(ME, "/отчёт")
     await telegram.press(ME, telegram.button("Опубликовать"))
     assert telegram.session.sent()[-1].startswith("Площадки не настроены")
 
@@ -319,7 +319,7 @@ async def test_post_cancelled_and_stranger_cannot_press(sessions: async_sessionm
     await spend(sessions)
     channel: Recording = Recording("Telegram")
     telegram: Telegram = Telegram(build_agent(scripted()), sessions, scripted(AIMessage("Пост.")), [channel])
-    await telegram.send(ME, "/post")
+    await telegram.send(ME, "/отчёт")
     await telegram.press(STRANGER, telegram.button("Опубликовать"))
     assert channel.posts == []
     await telegram.press(ME, telegram.button("Отмена"))
@@ -329,7 +329,7 @@ async def test_post_cancelled_and_stranger_cannot_press(sessions: async_sessionm
 @requires_db
 async def test_post_with_nothing_spent(sessions: async_sessionmaker[AsyncSession]) -> None:
     telegram: Telegram = Telegram(build_agent(scripted()), sessions)
-    await telegram.send(ME, "/post")
+    await telegram.send(ME, "/отчёт")
     assert telegram.session.sent() == [NOTHING_TO_POST]
 
 
@@ -345,3 +345,32 @@ async def test_post_with_nothing_spent(sessions: async_sessionmaker[AsyncSession
 )
 def test_chunks(text: str, expected: list[str]) -> None:
     assert chunks(text, size=5) == expected
+
+
+@requires_db
+@pytest.mark.parametrize("command", ["/сегодня", "/СЕГОДНЯ", "/today", "/неделя", "/week"])
+async def test_a_command_never_reaches_the_model(
+    command: str, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    await spend(sessions)
+    script: Script = Script([AIMessage("never reached")])
+    telegram: Telegram = Telegram(build_agent(ScriptedModel(messages=script)), sessions)
+    await telegram.send(ME, command)
+    assert script.answers == [AIMessage("never reached")]
+    assert "Итого: 60 000 ₫" in telegram.session.sent()[0]
+
+
+@requires_db
+async def test_yesterday_is_empty_when_all_was_spent_today(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    await spend(sessions)
+    telegram: Telegram = Telegram(build_agent(scripted()), sessions)
+    await telegram.send(ME, "/вчера")
+    assert telegram.session.sent()[0].endswith("трат нет")
+
+
+async def test_a_command_from_a_stranger_is_dropped() -> None:
+    telegram: Telegram = Telegram(build_agent(scripted()))
+    await telegram.send(STRANGER, "/сегодня")
+    assert telegram.session.sent() == []

@@ -57,12 +57,18 @@ async def test_one_message_several_expenses(sessions: async_sessionmaker[AsyncSe
                     ]
                 },
             ),
-            AIMessage("Записал: фо 60 000, кофе 35 000."),
         )
     )
     answer: str = await reply(agent, CHAT, "фо 60к, кофе вчера 35к", context(sessions))
-    assert answer == "Записал: фо 60 000, кофе 35 000."
     rows: list[Expense] = await recorded(sessions)
+    assert answer.splitlines() == [
+        "Записал:",
+        f"#{rows[1].id} 60 000 ₫ Кафе «фо»",
+        f"#{rows[0].id} 35 000 ₫ Кафе «кофе»",
+        "Всего в сообщении: 95 000 ₫",
+        "За 1 ноября: 35 000 ₫",
+        "За 2 ноября: 60 000 ₫",
+    ]
     assert [(r.note, r.amount, r.currency, r.spent_on, r.user_id) for r in rows] == [
         ("кофе", Decimal(35000), "VND", date(2026, 11, 1), ME),
         ("фо", Decimal(60000), "VND", TODAY, ME),  # no date from the model: today of the context
@@ -181,7 +187,7 @@ async def tool_answers(
     script: list[AIMessage] = []
     step: tuple[str, AIMessage]
     for step in steps:
-        script += [step[1], AIMessage("Готово.")]
+        script.append(step[1])
     agent: Agent = build_agent(scripted(*script), InMemorySaver())
     for step in steps:
         await reply(agent, CHAT, step[0], context(sessions))
@@ -211,12 +217,12 @@ async def test_totals_after_a_record_come_from_the_code(sessions: async_sessionm
             ),
         ),
     )
-    assert answers[0].splitlines()[-1] == "Total for 2026-11-02: 60 000 VND"
-    assert "this message" not in answers[0]  # one line is its own total
+    assert answers[0].splitlines()[-1] == "За 2 ноября: 60 000 ₫"
+    assert "Всего в сообщении" not in answers[0]  # one line is its own total
     assert answers[1].splitlines()[-3:] == [
-        "Total of this message: 12.50 USD, 80 000 VND",
-        "Total for 2026-11-01: 45 000 VND",
-        "Total for 2026-11-02: 12.50 USD, 95 000 VND",
+        "Всего в сообщении: 12.50 USD, 80 000 ₫",
+        "За 1 ноября: 45 000 ₫",
+        "За 2 ноября: 12.50 USD, 95 000 ₫",
     ]
 
 
@@ -226,20 +232,16 @@ async def test_totals_after_a_correction_and_a_deletion(sessions: async_sessionm
         {"items": [{"amount": 60000, "category": "eating_out"}, {"amount": 35000, "category": "eating_out"}]},
     )
     first: list[str] = await tool_answers(sessions, ("фо 60к, кофе 35к", add))
-    assert first[0].endswith("Total for 2026-11-02: 95 000 VND")
+    assert first[0].endswith("За 2 ноября: 95 000 ₫")
     rows: list[Expense] = await recorded(sessions)
     edit: AIMessage = call("edit_expense", {"expense_id": rows[0].id, "changes": {"amount": 50000}})
-    assert (await tool_answers(sessions, ("нет, было 50", edit)))[0].endswith(
-        "Total for 2026-11-02: 85 000 VND"
-    )
+    assert (await tool_answers(sessions, ("нет, было 50", edit)))[0].endswith("За 2 ноября: 85 000 ₫")
     remove: AIMessage = call("delete_expense", {"expense_id": rows[1].id})
-    assert (await tool_answers(sessions, ("кофе не было", remove)))[0].endswith(
-        "Total for 2026-11-02: 50 000 VND"
-    )
+    assert (await tool_answers(sessions, ("кофе не было", remove)))[0].endswith("За 2 ноября: 50 000 ₫")
     remove = call("delete_expense", {"expense_id": rows[0].id})
-    assert (await tool_answers(sessions, ("и фо", remove)))[0].endswith("Total for 2026-11-02: 0")
+    assert (await tool_answers(sessions, ("и фо", remove)))[0].endswith("За 2 ноября: 0")
     remove = call("delete_expense", {"expense_id": rows[0].id})
-    assert (await tool_answers(sessions, ("ещё раз", remove)))[0] == f"No expense #{rows[0].id}"
+    assert (await tool_answers(sessions, ("ещё раз", remove)))[0] == f"Нет записи #{rows[0].id}"
 
 
 async def summary_answer(sessions: async_sessionmaker[AsyncSession], rates: FixedRates) -> str:
@@ -255,7 +257,6 @@ async def summary_answer(sessions: async_sessionmaker[AsyncSession], rates: Fixe
                 ]
             },
         ),
-        AIMessage("Записал."),
         call("summary", {"start": "2026-11-02", "end": "2026-11-08"}),
         AIMessage("Вот."),
     )
@@ -293,17 +294,70 @@ async def test_summary_without_rates_keeps_the_totals(sessions: async_sessionmak
 @pytest.mark.parametrize(
     ("args", "expected"),
     [
-        ({"amount": 1000000, "currency": "VND"}, "1 000 000 VND = 3 142.23 RUB (Bank of Russia, 31.10.2026)"),
-        ({"amount": 1, "currency": "usd", "to": "vnd"}, "1 USD = 25 636.98 VND (Bank of Russia, 31.10.2026)"),
-        ({"amount": 1, "currency": "XYZ"}, "The Bank of Russia has no rate for XYZ"),
+        ({"amount": 1000000, "currency": "VND"}, "1 000 000 VND = 3 142.23 RUB (ЦБ, 31.10.2026)"),
+        ({"amount": 1, "currency": "usd", "to": "vnd"}, "1 USD = 25 636.98 VND (ЦБ, 31.10.2026)"),
+        ({"amount": 1, "currency": "XYZ"}, "У ЦБ нет курса XYZ"),
     ],
 )
 async def test_convert(
     sessions: async_sessionmaker[AsyncSession], args: dict[str, object], expected: str
 ) -> None:
-    agent: Agent = build_agent(scripted(call("convert", args), AIMessage("Вот.")), InMemorySaver())
-    await reply(agent, CHAT, "сколько это в рублях?", context(sessions))
-    history: list[BaseMessage] = (
-        await agent.aget_state({"configurable": {"thread_id": thread(CHAT, TODAY)}})
-    ).values["messages"]
-    assert history[-2].content == expected
+    agent: Agent = build_agent(scripted(call("convert", args)), InMemorySaver())
+    assert await reply(agent, CHAT, "сколько это в рублях?", context(sessions)) == expected
+
+
+def add(amount: int, id: str = "c1") -> AIMessage:
+    return call("add_expenses", {"items": [{"amount": amount, "category": "groceries"}]}, id=id)
+
+
+async def test_a_direct_answer_spends_no_second_model_call(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    script: Script = Script([add(60000), AIMessage("never reached")])
+    agent: Agent = build_agent(ScriptedModel(messages=script), InMemorySaver())
+    answer: str = await reply(agent, CHAT, "продукты 60к", context(sessions))
+    assert answer.startswith("Записал:")
+    assert script.answers == [AIMessage("never reached")]
+
+
+async def test_a_question_about_a_day_gets_the_report_as_is(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    agent: Agent = build_agent(
+        scripted(add(60000), call("report", {"start": "2026-11-02", "end": "2026-11-02"})), InMemorySaver()
+    )
+    await reply(agent, CHAT, "продукты 60к", context(sessions))
+    answer: str = await reply(agent, CHAT, "сколько сегодня?", context(sessions))
+    assert answer.splitlines()[0] == "Сегодня, 2 ноября"
+    assert answer.splitlines()[-2:] == [
+        "Итого: 60 000 ₫ · 189 ₽",
+        "Курс ЦБ на 31.10.2026: 10 000 ₫ = 31.42 ₽",
+    ]
+
+
+async def test_several_direct_answers_all_reach_the_user(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    both: AIMessage = AIMessage(
+        "",
+        tool_calls=[
+            ToolCall(
+                name="add_expenses",
+                args={"items": [{"amount": 60000, "category": "groceries"}]},
+                id="c1",
+            ),
+            ToolCall(name="convert", args={"amount": 1, "currency": "USD"}, id="c2"),
+        ],
+    )
+    answer: str = await reply(build_agent(scripted(both)), CHAT, "продукты 60к и доллар?", context(sessions))
+    assert answer.startswith("Записал:")
+    assert "1 USD = " in answer
+
+
+async def test_analysis_goes_back_to_the_model(sessions: async_sessionmaker[AsyncSession]) -> None:
+    agent: Agent = build_agent(
+        scripted(
+            call("summary", {"start": "2026-11-02", "end": "2026-11-08"}), AIMessage("Меньше, чем было.")
+        )
+    )
+    assert await reply(agent, CHAT, "почему меньше?", context(sessions)) == "Меньше, чем было."

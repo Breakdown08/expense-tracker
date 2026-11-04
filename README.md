@@ -1,8 +1,8 @@
 # expense-tracker
 
 A family expense tracker in Telegram. Write to the bot the way you would jot it down in a notebook —
-«фо 60к», «нет, было 50» — and an LLM agent records, corrects and summarises expenses. On `/post` it
-drafts a post about how the family's week went and publishes it to Threads and a Telegram channel
+«фо 60к», «нет, было 50» — and an LLM agent records, corrects and summarises expenses. On `/отчёт` it
+drafts a post about how the family's month went and publishes it to Threads and a Telegram channel
 after your approval.
 
 > **Status:** in daily use since November 2026 for recording and summaries. The posting flow works
@@ -20,8 +20,14 @@ after your approval.
   checkpointer across restarts: «нет, было 50» finds today's record, while last month comes from
   SQL, not from the chat. A year of use costs no more tokens per message than the first day.
   Tools report totals too, counted in SQL: the model retells them and never adds up.
+- **Code before the model.** `/сегодня`, `/вчера`, `/неделя` are plain templates over SQL and never
+  reach the agent. A question in words reaches it, but when a tool already holds the answer — a
+  record saved, a day's report, a conversion — the graph ends right after the tool, so the model
+  reads the text and picks the tool, and does not retell the result. That halved the tokens: the eval
+  went from 5 400 to 2 900 input tokens a case, same score. Comparing periods still goes back to the
+  model. It is a `before_model` hook, not `return_direct`, which would send a tool error to the chat.
 - **Posting flow** — its own LangGraph `StateGraph` (`post.py`), since a run of four calls could not
-  do this: figures (SQL: amounts in dong, shares, changes) → draft (LLM) → pause for
+  do this: figures for the last 30 days (SQL: amounts in dong, shares, changes) → draft (LLM) → pause for
   approval, for hours and across restarts → edit loop → one platform per step, so a failure or a
   crash never posts twice → retry only what failed. Without platform keys the bot leaves the text to
   copy by hand.
@@ -34,7 +40,7 @@ database with what should have: amount, currency, day, category. It costs money,
 
 | Model | Exact | Amounts | Tokens per case | Cost of a run |
 |---|---|---|---|---|
-| `claude-haiku-5-5` | 61/61 | 61/61 | 5 400 in, 206 out | $0.04 |
+| `claude-haiku-5-5` | 61/61 | 61/61 | 2 900 in, 141 out | $0.02 |
 
 Read that as «no misses on this set», not as 100% accuracy. The 61 phrases
 ([`evals/phrases.jsonl`](evals/phrases.jsonl)) are written by hand in the style of real messages —
