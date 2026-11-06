@@ -55,10 +55,10 @@ async def test_one_message_several_expenses(sessions: async_sessionmaker[AsyncSe
                 "add_expenses",
                 {
                     "items": [
-                        {"amount": 60000, "category": "eating_out", "note": "фо"},
+                        {"amount": 60000, "category": "cafe", "note": "фо"},
                         {
                             "amount": "35000",
-                            "category": "eating_out",
+                            "category": "cafe",
                             "note": "кофе",
                             "spent_on": "2026-11-01",
                         },
@@ -86,7 +86,7 @@ async def test_one_message_several_expenses(sessions: async_sessionmaker[AsyncSe
 async def test_correction_uses_memory_of_the_chat(sessions: async_sessionmaker[AsyncSession]) -> None:
     """«нет, было 50» needs the #id from the previous turn: the checkpointer keeps it."""
     model: ScriptedModel = scripted(
-        call("add_expenses", {"items": [{"amount": 60000, "category": "eating_out", "note": "фо"}]}),
+        call("add_expenses", {"items": [{"amount": 60000, "category": "cafe", "note": "фо"}]}),
         AIMessage("Записал."),
     )
     agent: Agent = build_agent(model, InMemorySaver())
@@ -108,7 +108,7 @@ async def test_correction_uses_memory_of_the_chat(sessions: async_sessionmaker[A
 
 async def test_ids_reach_the_model_and_not_the_chat(sessions: async_sessionmaker[AsyncSession]) -> None:
     agent: Agent = build_agent(
-        scripted(call("add_expenses", {"items": [{"amount": 60000, "category": "eating_out"}]})),
+        scripted(call("add_expenses", {"items": [{"amount": 60000, "category": "cafe"}]})),
         InMemorySaver(),
     )
     answer: str = await reply(agent, CHAT, "фо 60к", context(sessions))
@@ -122,7 +122,7 @@ async def test_ids_reach_the_model_and_not_the_chat(sessions: async_sessionmaker
 async def test_bad_tool_arguments_go_back_to_the_model(sessions: async_sessionmaker[AsyncSession]) -> None:
     agent: Agent = build_agent(
         scripted(
-            call("add_expenses", {"items": [{"amount": -5, "category": "eating_out"}]}),
+            call("add_expenses", {"items": [{"amount": -5, "category": "cafe"}]}),
             AIMessage("Сумма должна быть положительной — сколько было?"),
         )
     )
@@ -182,7 +182,7 @@ async def test_memory_survives_restart(test_db_url: str, sessions: async_session
 async def test_a_new_day_starts_a_new_history(sessions: async_sessionmaker[AsyncSession]) -> None:
     """Yesterday's chat is not re-sent to the model; yesterday's expenses are still in the database."""
     model: ScriptedModel = scripted(
-        call("add_expenses", {"items": [{"amount": 60000, "category": "eating_out", "note": "фо"}]}),
+        call("add_expenses", {"items": [{"amount": 60000, "category": "cafe", "note": "фо"}]}),
         AIMessage("Записал."),
     )
     agent: Agent = build_agent(model, InMemorySaver())
@@ -222,16 +222,16 @@ async def test_totals_after_a_record_come_from_the_code(sessions: async_sessionm
     """The message's total and the day's: earlier today counts for the day, not for the message."""
     answers: list[str] = await tool_answers(
         sessions,
-        ("фо 60к", call("add_expenses", {"items": [{"amount": 60000, "category": "eating_out"}]})),
+        ("фо 60к", call("add_expenses", {"items": [{"amount": 60000, "category": "cafe"}]})),
         (
             "кофе 35к, билет 12.5$, вчера грэб 45к",
             call(
                 "add_expenses",
                 {
                     "items": [
-                        {"amount": 35000, "category": "eating_out"},
-                        {"amount": "12.50", "currency": "USD", "category": "travel"},
-                        {"amount": 45000, "category": "transport", "spent_on": "2026-11-01"},
+                        {"amount": 35000, "category": "cafe"},
+                        {"amount": "12.50", "currency": "USD", "category": "coffee"},
+                        {"amount": 45000, "category": "taxi", "spent_on": "2026-11-01"},
                     ]
                 },
                 id="c2",
@@ -250,7 +250,7 @@ async def test_totals_after_a_record_come_from_the_code(sessions: async_sessionm
 async def test_totals_after_a_correction_and_a_deletion(sessions: async_sessionmaker[AsyncSession]) -> None:
     add: AIMessage = call(
         "add_expenses",
-        {"items": [{"amount": 60000, "category": "eating_out"}, {"amount": 35000, "category": "eating_out"}]},
+        {"items": [{"amount": 60000, "category": "cafe"}, {"amount": 35000, "category": "cafe"}]},
     )
     first: list[str] = await tool_answers(sessions, ("фо 60к, кофе 35к", add))
     assert first[0].endswith("За 2 ноября: 95 000 ₫")
@@ -276,7 +276,7 @@ async def summary_answer(sessions: async_sessionmaker[AsyncSession], rates: Fixe
             {
                 "items": [
                     {"amount": 100000, "category": "groceries"},
-                    {"amount": "12.50", "currency": "USD", "category": "travel"},
+                    {"amount": "12.50", "currency": "USD", "category": "coffee"},
                     {"amount": 50000, "category": "groceries", "spent_on": "2026-10-26"},
                 ]
             },
@@ -296,7 +296,7 @@ async def summary_answer(sessions: async_sessionmaker[AsyncSession], rates: Fixe
 
 async def test_summary_totals_in_vnd_and_rub(sessions: async_sessionmaker[AsyncSession]) -> None:
     assert (await summary_answer(sessions, FixedRates())).splitlines() == [
-        "travel USD: 12.50 (1), before 0",
+        "coffee USD: 12.50 (1), before 0",
         "groceries VND: 100 000 (1), before 50 000",
         "Total USD: 12.50, before 0",
         "Total VND: 100 000, before 50 000",

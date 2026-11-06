@@ -19,17 +19,16 @@ ONE: Decimal = Decimal(1)  # quantize to whole units: round() would return an in
 SIGNS: dict[str, str] = {"VND": "₫", "RUB": "₽"}
 
 CATEGORY_NAMES: dict[Category, str] = {
+    Category.MOBILE: "Мобильная связь и интернет",
+    Category.RENT: "Оплата за квартиру",
+    Category.COFFEE: "Кофе",
+    Category.DRINKS: "Другие напитки",
     Category.GROCERIES: "Продукты",
-    Category.EATING_OUT: "Кафе",
-    Category.TRANSPORT: "Транспорт",
-    Category.HOUSING: "Жильё",
-    Category.SUBSCRIPTIONS: "Подписки",
-    Category.HOUSEHOLD: "Дом",
-    Category.HEALTH: "Здоровье",
-    Category.CLOTHES: "Одежда",
-    Category.LEISURE: "Досуг",
-    Category.TRAVEL: "Поездки",
-    Category.OTHER: "Другое",
+    Category.CAFE: "Кафе",
+    Category.HOUSEHOLD: "Товары для дома",
+    Category.TAXI: "Такси",
+    Category.SUBSCRIPTIONS: "Подписки на сервисы",
+    Category.PHARMACY: "Аптека",
 }
 
 MONTHS: tuple[str, ...] = (

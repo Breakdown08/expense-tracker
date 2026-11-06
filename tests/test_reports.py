@@ -71,8 +71,8 @@ async def seed(sessions: async_sessionmaker[AsyncSession]) -> list[Expense]:
             [
                 NewExpense(amount=Decimal(60000), category=Category.GROCERIES, note="рынок", spent_on=TODAY),
                 NewExpense(amount=Decimal(40000), category=Category.GROCERIES, spent_on=date(2026, 11, 3)),
-                NewExpense(amount=Decimal(45000), category=Category.TRANSPORT, spent_on=date(2026, 11, 2)),
-                NewExpense(amount=Decimal(99000), category=Category.TRANSPORT, spent_on=date(2026, 11, 1)),
+                NewExpense(amount=Decimal(45000), category=Category.TAXI, spent_on=date(2026, 11, 2)),
+                NewExpense(amount=Decimal(99000), category=Category.TAXI, spent_on=date(2026, 11, 1)),
             ],
         )
 
@@ -97,7 +97,7 @@ async def test_a_period_goes_by_category(sessions: async_sessionmaker[AsyncSessi
     assert result.text.splitlines()[:4] == [
         "С 2 ноября по 4 ноября",
         "Продукты: 100 000 ₫ (2)",
-        "Транспорт: 45 000 ₫ (1)",  # Sunday's 99 000 is another week
+        "Такси: 45 000 ₫ (1)",  # Sunday's 99 000 is another week
         "Итого: 145 000 ₫ · 456 ₽",
     ]
 

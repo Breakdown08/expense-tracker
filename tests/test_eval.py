@@ -29,12 +29,12 @@ def row(amount: str, category: str, currency: str = "VND", spent_on: date = TODA
     return Expense(amount=Decimal(amount), currency=currency, category=category, spent_on=spent_on)
 
 
-FO: Spent = Spent(amount=Decimal(60000), category=Category.EATING_OUT)
+FO: Spent = Spent(amount=Decimal(60000), category=Category.CAFE)
 
 
 def test_right_in_any_order() -> None:
     expected: list[Spent] = [FO, Spent(amount=Decimal(9000), category=Category.GROCERIES)]
-    got: list[Expense] = [row("9000.00", "groceries"), row("60000.00", "eating_out")]
+    got: list[Expense] = [row("9000.00", "groceries"), row("60000.00", "cafe")]
     assert judge(expected, got) == Verdict(amounts=True, exact=True)
 
 
@@ -44,16 +44,16 @@ def test_wrong_category_keeps_the_amounts() -> None:
 
 def test_wrong_day_amount_or_currency_fails_both() -> None:
     wrong: Verdict = Verdict(amounts=False, exact=False)
-    assert judge([FO], [row("60000", "eating_out", spent_on=date(2026, 11, 1))]) == wrong
-    assert judge([FO], [row("6000", "eating_out")]) == wrong
-    assert judge([FO], [row("60000", "eating_out", currency="USD")]) == wrong
+    assert judge([FO], [row("60000", "cafe", spent_on=date(2026, 11, 1))]) == wrong
+    assert judge([FO], [row("6000", "cafe")]) == wrong
+    assert judge([FO], [row("60000", "cafe", currency="USD")]) == wrong
 
 
 def test_recording_nothing_or_twice_fails() -> None:
     wrong: Verdict = Verdict(amounts=False, exact=False)
     assert judge([FO], []) == wrong
-    assert judge([FO], [row("60000", "eating_out"), row("60000", "eating_out")]) == wrong
-    assert judge([], [row("60000", "eating_out")]) == wrong
+    assert judge([FO], [row("60000", "cafe"), row("60000", "cafe")]) == wrong
+    assert judge([], [row("60000", "cafe")]) == wrong
 
 
 def test_nothing_expected_nothing_recorded() -> None:
@@ -73,8 +73,8 @@ def test_an_answer_needs_every_pattern_and_no_id() -> None:
 
 
 def test_final_book_drops_the_gone_and_adds_the_expected() -> None:
-    coffee: Spent = Spent(amount=Decimal(35000), category=Category.EATING_OUT)
-    fixed: Spent = Spent(amount=Decimal(40000), category=Category.EATING_OUT)
+    coffee: Spent = Spent(amount=Decimal(35000), category=Category.CAFE)
+    fixed: Spent = Spent(amount=Decimal(40000), category=Category.CAFE)
     case: Case = Case(messages=["во второй было 40к"], book=True, gone=[1], expected=[fixed])
     assert final(case, [FO, coffee]) == [FO, fixed]
     assert final(Case(messages=["фо 60к"], expected=[FO]), [coffee]) == [FO]  # an empty book to start
@@ -93,7 +93,7 @@ async def test_a_case_stops_before_wiping_any_other_database(
     session: AsyncSession
     async with sessions() as session:
         await add_expenses(
-            session, 1, [NewExpense(amount=Decimal(1), category=Category.OTHER, spent_on=TODAY)]
+            session, 1, [NewExpense(amount=Decimal(1), category=Category.HOUSEHOLD, spent_on=TODAY)]
         )
     with pytest.raises(RuntimeError, match="stopped"):
         await run_case(Case(messages=["фо 60к"]), [], scripted(), sessions)

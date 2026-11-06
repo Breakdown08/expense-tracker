@@ -13,17 +13,16 @@ from expense_tracker.models import Expense
 
 
 class Category(StrEnum):
+    MOBILE = "mobile"  # phone plan, internet
+    RENT = "rent"  # rent, utilities
+    COFFEE = "coffee"
+    DRINKS = "drinks"  # tea, water, juice and the like
     GROCERIES = "groceries"
-    EATING_OUT = "eating_out"
-    TRANSPORT = "transport"
-    HOUSING = "housing"  # rent, utilities
-    SUBSCRIPTIONS = "subscriptions"  # internet, phone plan, streaming, apps
+    CAFE = "cafe"
     HOUSEHOLD = "household"
-    HEALTH = "health"
-    CLOTHES = "clothes"
-    LEISURE = "leisure"
-    TRAVEL = "travel"
-    OTHER = "other"
+    TAXI = "taxi"
+    SUBSCRIPTIONS = "subscriptions"  # streaming, apps
+    PHARMACY = "pharmacy"
 
 
 class NewExpense(BaseModel):

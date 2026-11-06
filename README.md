@@ -41,15 +41,17 @@ book, and their answers must hold the figures worked out by hand. It costs money
 
 | Model | Exact | Amounts | Answers | Tokens per case | Cost of a run |
 |---|---|---|---|---|---|
-| `claude-haiku-5-5` | 78/78 | 78/78 | 78/78 | 3 400 in, 172 out | $0.03 |
+| `claude-haiku-5-5` | 70/70 | 70/70 | 70/70 | 3 400 in, 178 out | $0.03 |
 
 Read that as «no misses on this set», not as 100% accuracy. The first run of the questions did miss:
-«сколько вчера вышло в долларах?» got a total in dong, and the prompt was fixed. The 61 phrases
+«сколько вчера вышло в долларах?» got a total in dong, and the prompt was fixed. The 53 phrases
 ([`evals/phrases.jsonl`](evals/phrases.jsonl)) are written by hand in the style of real messages —
 real ones stay private — by the author of the prompt, and they are easy for the model: categories,
 foreign currencies, relative dates, several expenses at once, corrections, and messages where it
 must ask instead of guessing. The 17 cases in [`evals/questions.jsonl`](evals/questions.jsonl) ask
 for totals, periods and conversions, and correct records by their number in a list.
+After the move to the family's own ten categories the first run wrote plane tickets into taxi; the
+prompt now limits it to rides. Expenses that fit no category must be asked about, not recorded.
 The default Groq model has not been run: no key here yet. Raw answers are in
 [`evals/results/`](evals/results/).
 

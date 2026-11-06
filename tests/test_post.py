@@ -50,9 +50,9 @@ def test_figures_have_dong_amounts_and_shares() -> None:
     text: str = describe(
         [
             total(Category.GROCERIES, 750000, 500000),
-            total(Category.HEALTH, 250000, 0),
-            total(Category.TRAVEL, 0, 500000),
-            total(Category.TRAVEL, 40, 0, "USD"),
+            total(Category.PHARMACY, 250000, 0),
+            total(Category.COFFEE, 0, 500000),
+            total(Category.COFFEE, 40, 0, "USD"),
         ],
         week,
     )
@@ -60,7 +60,7 @@ def test_figures_have_dong_amounts_and_shares() -> None:
         "Days 2026-11-02 .. 2026-11-08",
         "Total: 1 000 000 ₫, +0% compared to the 30 days before",
         "groceries: 750 000 ₫, 75% of spending, +50%",
-        "health: 250 000 ₫, 25% of spending, not there before",
+        "pharmacy: 250 000 ₫, 25% of spending, not there before",
     ]
     assert describe([], week) == ""
 

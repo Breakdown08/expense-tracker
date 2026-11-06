@@ -47,12 +47,8 @@ def test_amount_must_be_positive() -> None:
 @requires_db
 async def test_add_several_at_once(session: AsyncSession) -> None:
     items: list[NewExpense] = [
-        NewExpense(
-            amount=Decimal(60000), category=Category.EATING_OUT, note="фо", spent_on=date(2026, 11, 2)
-        ),
-        NewExpense(
-            amount=Decimal(35000), category=Category.EATING_OUT, note="кофе", spent_on=date(2026, 11, 2)
-        ),
+        NewExpense(amount=Decimal(60000), category=Category.CAFE, note="фо", spent_on=date(2026, 11, 2)),
+        NewExpense(amount=Decimal(35000), category=Category.CAFE, note="кофе", spent_on=date(2026, 11, 2)),
     ]
     rows: list[Expense] = await add_expenses(session, ME, items)
     assert [r.id for r in rows] == sorted(r.id for r in rows)
@@ -64,7 +60,7 @@ async def test_add_several_at_once(session: AsyncSession) -> None:
 async def test_database_rejects_non_positive_amount(session: AsyncSession) -> None:
     """The CHECK constraint holds even if someone bypasses NewExpense."""
     session.add(
-        Expense(user_id=ME, amount=Decimal(-1), currency="VND", category="other", spent_on=date.today())
+        Expense(user_id=ME, amount=Decimal(-1), currency="VND", category="household", spent_on=date.today())
     )
     with pytest.raises(IntegrityError):
         await session.flush()
@@ -72,18 +68,18 @@ async def test_database_rejects_non_positive_amount(session: AsyncSession) -> No
 
 @requires_db
 async def test_edit_changes_only_given_fields(session: AsyncSession) -> None:
-    row: Expense = (
-        await add_expenses(session, ME, [spent("60000", Category.EATING_OUT, date(2026, 11, 2))])
-    )[0]
+    row: Expense = (await add_expenses(session, ME, [spent("60000", Category.CAFE, date(2026, 11, 2))]))[0]
     edited: Expense | None = await edit_expense(session, row.id, ExpenseChanges(amount=Decimal(50000)))
     assert edited is not None
-    assert (edited.amount, edited.category) == (Decimal(50000), Category.EATING_OUT)
+    assert (edited.amount, edited.category) == (Decimal(50000), Category.CAFE)
     assert await edit_expense(session, row.id + 1000, ExpenseChanges(amount=Decimal(1))) is None
 
 
 @requires_db
 async def test_delete(session: AsyncSession) -> None:
-    row: Expense = (await add_expenses(session, ME, [spent("10000", Category.OTHER, date(2026, 11, 3))]))[0]
+    row: Expense = (await add_expenses(session, ME, [spent("10000", Category.HOUSEHOLD, date(2026, 11, 3))]))[
+        0
+    ]
     gone: Expense | None = await delete_expense(session, row.id)
     assert gone is not None and gone.spent_on == date(2026, 11, 3)
     assert await delete_expense(session, row.id) is None
@@ -98,7 +94,7 @@ async def test_list_filters_by_period_and_category(session: AsyncSession) -> Non
         [
             spent("1000", Category.GROCERIES, date(2026, 11, 1)),  # day before the week
             spent("2000", Category.GROCERIES, date(2026, 11, 2)),  # first day
-            spent("3000", Category.TRANSPORT, date(2026, 11, 8)),  # last day
+            spent("3000", Category.TAXI, date(2026, 11, 8)),  # last day
             spent("4000", Category.GROCERIES, date(2026, 11, 9)),  # end is exclusive
         ],
     )
@@ -115,16 +111,16 @@ async def test_summary_compares_with_previous_period(session: AsyncSession) -> N
             spent("100000", Category.GROCERIES, date(2026, 11, 2)),
             spent("50000", Category.GROCERIES, date(2026, 11, 5)),
             spent("80000", Category.GROCERIES, date(2026, 10, 28)),  # previous week
-            spent("30000", Category.TRANSPORT, date(2026, 10, 27)),  # previous week only
-            spent("12.50", Category.TRAVEL, date(2026, 11, 4), currency="USD"),
-            spent("999999", Category.HOUSING, date(2026, 10, 1)),  # outside both periods
+            spent("30000", Category.TAXI, date(2026, 10, 27)),  # previous week only
+            spent("12.50", Category.COFFEE, date(2026, 11, 4), currency="USD"),
+            spent("999999", Category.RENT, date(2026, 10, 1)),  # outside both periods
         ],
     )
-    await add_expenses(session, WIFE, [spent("20000", Category.EATING_OUT, date(2026, 11, 6))])
+    await add_expenses(session, WIFE, [spent("20000", Category.CAFE, date(2026, 11, 6))])
     totals: list[CategoryTotal] = await summary(session, WEEK)
     assert totals == [
         CategoryTotal(
-            category=Category.TRAVEL,
+            category=Category.COFFEE,
             currency="USD",
             total=Decimal("12.50"),
             count=1,
@@ -138,14 +134,14 @@ async def test_summary_compares_with_previous_period(session: AsyncSession) -> N
             previous_total=Decimal(80000),
         ),
         CategoryTotal(
-            category=Category.EATING_OUT,
+            category=Category.CAFE,
             currency="VND",
             total=Decimal(20000),
             count=1,
             previous_total=Decimal(0),
         ),
         CategoryTotal(
-            category=Category.TRANSPORT,
+            category=Category.TAXI,
             currency="VND",
             total=Decimal(0),
             count=0,

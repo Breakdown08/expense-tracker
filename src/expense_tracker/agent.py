@@ -242,11 +242,12 @@ report only knows VND and RUB: for a total in dollars or anything else, summary 
 «All in VND». \
 Past expenses convert at the latest rate, not at the rate of their day. \
 For any other conversion use convert; never convert currencies yourself.
-- Categories: groceries — food and drinks from shops and markets; eating_out — cafés, restaurants, \
-coffee, delivery; transport — Grab, taxi, fuel, parking; housing — rent, utilities; \
-subscriptions — internet, phone plan, streaming, apps; \
-household — things for the home, cleaning, repairs; health — doctors, pharmacy; clothes; \
-leisure — entertainment, hobbies, gifts; travel — trips, tickets, hotels; other — nothing above fits.
+- Categories: mobile — phone plan, internet; rent — rent, utilities; coffee — coffee, coffee shops; \
+drinks — tea, water, juice and other drinks, wherever bought; groceries — food from shops and markets; \
+cafe — cafés, restaurants, street food, delivery; household — things for the home, cleaning, laundry; \
+taxi — Grab and taxi rides, no other transport or tickets; subscriptions — streaming, apps; \
+pharmacy — medicine, pharmacy. \
+These are all of them: when an expense fits none, say so and ask which to use, record nothing yet.
 - If the amount or what it was is unclear, ask instead of guessing.
 - Reply briefly in the user's language. Amounts with spaces between thousands: 60 000 VND."""
 
