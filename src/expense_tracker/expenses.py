@@ -16,7 +16,7 @@ class Category(StrEnum):
     MOBILE = "mobile"  # phone plan, internet
     RENT = "rent"  # rent, utilities
     COFFEE = "coffee"
-    DRINKS = "drinks"  # tea, water, juice and the like
+    DRINKS = "drinks"  # tea, juice and the like; bottled water is groceries
     GROCERIES = "groceries"
     CAFE = "cafe"
     HOUSEHOLD = "household"

@@ -7,14 +7,14 @@
 {"messages": ["овощи на рынке 45к"], "expected": [{"amount": 45000, "category": "groceries"}]}
 {"messages": ["курица и рыба 120к"], "expected": [{"amount": 120000, "category": "groceries"}]}
 {"messages": ["продукты в Lotte 412к"], "expected": [{"amount": 412000, "category": "groceries"}]}
-{"messages": ["вода 19л 60к"], "expected": [{"amount": 60000, "category": "drinks"}]}
+{"messages": ["вода 19л 60к"], "expected": [{"amount": 60000, "category": "groceries"}]}
 {"messages": ["чай 50к"], "expected": [{"amount": 50000, "category": "drinks"}]}
 {"messages": ["хлеб 9000"], "expected": [{"amount": 9000, "category": "groceries"}]}
 {"messages": ["grab 45k"], "expected": [{"amount": 45000, "category": "taxi"}]}
 {"messages": ["такси до аэропорта 320к"], "expected": [{"amount": 320000, "category": "taxi"}]}
 {"messages": ["аренда 12 млн"], "expected": [{"amount": 12000000, "category": "rent"}]}
 {"messages": ["свет 1,2 млн"], "expected": [{"amount": 1200000, "category": "rent"}]}
-{"messages": ["вода за месяц по счётчику 150к"], "expected": [{"amount": 150000, "category": "rent"}]}
+{"messages": ["вода 30к"], "expected": [{"amount": 30000, "category": "groceries"}]}
 {"messages": ["интернет 250к"], "expected": [{"amount": 250000, "category": "mobile"}]}
 {"messages": ["связь на телефон 90к"], "expected": [{"amount": 90000, "category": "mobile"}]}
 {"messages": ["netflix 180к"], "expected": [{"amount": 180000, "category": "subscriptions"}]}

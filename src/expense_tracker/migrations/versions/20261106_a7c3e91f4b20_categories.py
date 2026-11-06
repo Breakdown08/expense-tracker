@@ -17,7 +17,7 @@ depends_on: str | Sequence[str] | None = None
 
 UP: tuple[tuple[str, str], ...] = (
     ("coffee", r"category = 'eating_out' AND note ~* 'коф|coffee'"),
-    ("drinks", r"category IN ('eating_out', 'groceries') AND note ~* '\m(напит|чай|чая|вод[аы]|сок)'"),
+    ("drinks", r"category IN ('eating_out', 'groceries') AND note ~* '\m(напит|чай|чая|сок)'"),
     ("mobile", r"category = 'subscriptions' AND note ~* 'интернет|связ|тариф'"),
     ("cafe", "category = 'eating_out'"),
     ("taxi", "category = 'transport'"),
