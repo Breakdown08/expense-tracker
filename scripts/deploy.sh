@@ -31,12 +31,15 @@ k3d image import expense-tracker:local -c "$CLUSTER"
 kubectl --context "$CONTEXT" create namespace "$NAMESPACE" --dry-run=client -o yaml |
   kubectl --context "$CONTEXT" apply -f -
 
-secret_args=(--from-env-file="$ENV_FILE")
+# kubectl refuses --from-env-file together with --from-literal: add the default to a copy instead.
+env_copy="$(mktemp)"
+trap 'rm -f "$env_copy"' EXIT
+cat "$ENV_FILE" >"$env_copy"
 if ! grep -q '^POSTGRES_PASSWORD=' "$ENV_FILE"; then
-  secret_args+=(--from-literal=POSTGRES_PASSWORD=tracker)
+  printf '\nPOSTGRES_PASSWORD=tracker\n' >>"$env_copy"
 fi
 kubectl --context "$CONTEXT" -n "$NAMESPACE" create secret generic expense-tracker-env \
-  "${secret_args[@]}" --dry-run=client -o yaml |
+  --from-env-file="$env_copy" --dry-run=client -o yaml |
   kubectl --context "$CONTEXT" apply -f -
 
 kubectl --context "$CONTEXT" apply -k k8s/overlays/k3d
