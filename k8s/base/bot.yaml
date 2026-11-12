@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bot
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # two long pollings with one token conflict: the old pod goes first
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bot
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bot
+        app.kubernetes.io/part-of: expense-tracker
+    spec:
+      enableServiceLinks: false
+      initContainers:
+        - name: wait-postgres
+          image: postgres:18-alpine
+          command: ["sh", "-c", "until pg_isready -h postgres -p 5432 -U tracker -d tracker; do sleep 2; done"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+        - name: migrate
+          image: expense-tracker
+          imagePullPolicy: IfNotPresent
+          command: ["/app/.venv/bin/python", "-m", "expense_tracker", "migrate"]
+          envFrom:
+            - secretRef:
+                name: expense-tracker-env
+          env: &env
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: expense-tracker-env
+                  key: POSTGRES_PASSWORD
+            - name: DATABASE_URL
+              value: postgresql://tracker:$(POSTGRES_PASSWORD)@postgres:5432/tracker
+          resources: &resources
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+      containers:
+        - name: bot
+          image: expense-tracker
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - secretRef:
+                name: expense-tracker-env
+          env: *env
+          resources: *resources

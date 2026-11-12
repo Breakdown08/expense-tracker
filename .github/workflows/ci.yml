@@ -44,3 +44,65 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build -t expense-tracker .
+
+  k8s:
+    runs-on: ubuntu-24.04
+    env:
+      CONTEXT: k3d-expense-tracker
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install k3d
+        run: curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | TAG=v5.9.0 bash
+      - name: Create the cluster
+        run: EXPENSE_TRACKER_DATA=$RUNNER_TEMP/et scripts/k3d-cluster.sh
+      - name: Dummy env file
+        run: |
+          cat > "$RUNNER_TEMP/ci.env" <<'ENV'
+          TELEGRAM_BOT_TOKEN=123456:ci-dummy
+          ALLOWED_USER_IDS=1
+          GROQ_API_KEY=ci-dummy
+          POSTGRES_PASSWORD=ci
+          ENV
+      - name: Deploy
+        run: ENV_FILE=$RUNNER_TEMP/ci.env WAIT_BOT=0 scripts/deploy.sh
+      - name: Wait for the migrate initContainer to succeed
+        run: |
+          for _ in $(seq 60); do
+            code=$(kubectl --context "$CONTEXT" -n expense-tracker get pod -l app.kubernetes.io/name=bot \
+              -o jsonpath='{.items[0].status.initContainerStatuses[?(@.name=="migrate")].state.terminated.exitCode}' || true)
+            [ "$code" = 0 ] && exit 0
+            sleep 3
+          done
+          echo "migrate did not finish with exit code 0 (last: '$code')" >&2
+          exit 1
+      - name: One row in alembic_version
+        run: |
+          rows=$(kubectl --context "$CONTEXT" -n expense-tracker exec postgres-0 -- \
+            psql -U tracker -d tracker -tAc "select count(*) from alembic_version")
+          [ "$rows" = 1 ]
+      - name: The bot reached saver.setup()
+        run: |
+          for _ in $(seq 60); do
+            reg=$(kubectl --context "$CONTEXT" -n expense-tracker exec postgres-0 -- \
+              psql -U tracker -d tracker -tAc "select to_regclass('public.checkpoints')")
+            [ -n "$reg" ] && exit 0
+            sleep 3
+          done
+          echo "table checkpoints did not appear" >&2
+          exit 1
+      - name: Backup and restore round trip
+        run: |
+          psql() { kubectl --context "$CONTEXT" -n expense-tracker exec postgres-0 -- psql -U tracker -d tracker -tAc "$1"; }
+          psql "create table ci_marker(v text); insert into ci_marker values ('ok')"
+          scripts/backup.sh
+          psql "drop table ci_marker"
+          scripts/restore.sh latest
+          [ "$(psql 'select v from ci_marker')" = ok ]
+      - name: Diagnostics
+        if: failure()
+        run: |
+          kubectl --context "$CONTEXT" get all,pvc,jobs -n expense-tracker || true
+          kubectl --context "$CONTEXT" describe pods -n expense-tracker || true
+          for pod in $(kubectl --context "$CONTEXT" -n expense-tracker get pods -o name); do
+            kubectl --context "$CONTEXT" -n expense-tracker logs "$pod" --all-containers --prefix || true
+          done

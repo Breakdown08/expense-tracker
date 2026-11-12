@@ -12,7 +12,7 @@ after your approval.
 ## Design
 
 - **Runs on a laptop at home.** Long polling needs no public IP, domain or VPS; if the laptop sleeps,
-  Telegram keeps messages for a day. `docker compose` restarts everything after a reboot.
+  Telegram keeps messages for a day. The bot runs in a local k3d cluster (see Kubernetes below), `docker compose` is the fallback.
 - **Expense agent** — LangChain `create_agent` with tools over `expenses.py`; the numbers come
   from SQL in the tools, the model only retells them. Middleware instead of hand-written loops:
   rate limits and provider 5xx are retried while a wrong key is not, and one message is capped at
@@ -70,6 +70,79 @@ The bot works in a private chat or in a group shared by the family: there everyo
 record, and the agent keeps one history for the group, each message tagged with its author. For a
 group, turn privacy mode off in @BotFather (`/setprivacy` → Disable) *before* adding the bot,
 otherwise it sees only commands; afterwards `/setjoingroups` → Disable keeps it out of other groups.
+
+## Kubernetes (k3d)
+
+The bot and Postgres run in a local [k3d](https://k3d.io) cluster on the same laptop; manifests are
+in [`k8s/`](k8s/) (Kustomize: `k8s/base` plus the overlay `k8s/overlays/k3d`), `docker compose` stays
+as the fallback. Needs docker, k3d and kubectl.
+
+```sh
+scripts/k3d-cluster.sh   # create or start the cluster; storage is under $EXPENSE_TRACKER_DATA/k3d-storage
+scripts/deploy.sh        # build the image, create the Secret from .env, apply the manifests
+```
+
+The Secret `expense-tracker-env` is made from `.env` (`ENV_FILE`) and is never in git. If `.env` has
+no `POSTGRES_PASSWORD`, `tracker` is used, as in compose. Changing it later does not change the
+password of an already initialised database (same as in compose); it must be usable inside a URL.
+`deploy.sh` refuses to run while the compose bot is up: two long pollings with one token conflict.
+Variables: `CLUSTER` (default `expense-tracker`), `NAMESPACE`, `EXPENSE_TRACKER_DATA`
+(default `~/.local/share/expense-tracker`), `ENV_FILE`, `WAIT_BOT`.
+
+Migrations run in the initContainer `python -m expense_tracker migrate`, which needs only `DATABASE_URL`.
+
+### Backups
+
+A CronJob makes `pg_dump` every day at 22:00 (`Asia/Ho_Chi_Minh`) and keeps the last 14 copies.
+Copies lie on the same disk as the database: they save from a dropped table, not from a dead SSD.
+On the host they are in `$EXPENSE_TRACKER_DATA/k3d-storage/pvc-*_expense-tracker_backups/`.
+
+```sh
+scripts/backup.sh               # a backup now
+scripts/restore.sh latest       # restore from the newest copy in the cluster
+scripts/restore.sh ~/some.dump  # or from a file on the host
+```
+
+A restore stops the bot, replaces the data, and starts the bot again. After `k3d cluster delete`
+the new cluster is empty: fill it with `restore.sh` from a copy on the host.
+
+### Moving from compose
+
+```sh
+scripts/k3d-cluster.sh
+docker compose stop bot
+docker compose exec -T db pg_dump -U tracker --format=custom tracker > ~/expense-tracker-compose.dump
+scripts/deploy.sh
+scripts/restore.sh ~/expense-tracker-compose.dump
+```
+
+Compare both sides, the results must match:
+
+```sh
+docker compose exec -T db psql -U tracker -d tracker -tAc 'select count(*), sum(amount) from expenses'
+kubectl --context k3d-expense-tracker -n expense-tracker exec postgres-0 -- \
+  psql -U tracker -d tracker -tAc 'select count(*), sum(amount) from expenses'
+```
+
+Then `docker compose stop db` (a manually stopped container does not come back after a reboot).
+Keep the volume `pgdata`: it is the way back.
+
+### Back to compose
+
+```sh
+kubectl --context k3d-expense-tracker -n expense-tracker scale deployment/bot --replicas=0
+kubectl --context k3d-expense-tracker -n expense-tracker exec postgres-0 -- \
+  pg_dump -U tracker --format=custom tracker > ~/expense-tracker-k3d.dump
+docker compose up -d db
+docker compose exec -T db pg_restore --clean --if-exists --single-transaction --no-owner \
+  -U tracker -d tracker < ~/expense-tracker-k3d.dump
+docker compose up -d
+k3d cluster stop expense-tracker   # optional
+```
+
+### Shell scripts
+
+CI lints them with shellcheck; on NixOS: `nix shell nixpkgs#shellcheck`.
 
 ## Develop
 
