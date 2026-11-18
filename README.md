@@ -23,8 +23,9 @@ after your approval.
 - **Code before the model.** `/сегодня`, `/вчера`, `/неделя` are plain templates over SQL and never
   reach the agent. A question in words reaches it, but when a tool already holds the answer — a
   record saved, a day's report, a conversion — the graph ends right after the tool, so the model
-  reads the text and picks the tool, and does not retell the result. That halved the tokens: the eval
-  went from 5 400 to 2 900 input tokens a case, same score. Comparing periods still goes back to the
+  reads the text and picks the tool, and does not retell the result. That halved the tokens: on the
+  61-case eval of the time, 5 400 → 2 900 input tokens a case, same score (the set has grown since;
+  current figures are in [Measured](#measured)). Comparing periods still goes back to the
   model. It is a `before_model` hook, not `return_direct`, which would send a tool error to the chat.
 - **Posting flow** — its own LangGraph `StateGraph` (`post.py`), since a run of four calls could not
   do this: figures for the last 30 days (SQL: amounts in dong, shares, changes) → draft (LLM) → pause for
@@ -95,6 +96,8 @@ Migrations run in the initContainer `python -m expense_tracker migrate`, which n
 
 A CronJob makes `pg_dump` every day at 22:00 (`Asia/Ho_Chi_Minh`) and keeps the last 14 copies.
 Copies lie on the same disk as the database: they save from a dropped table, not from a dead SSD.
+Checked on 2026-11-18: the scheduled copy of 17 November, restored into a clean Postgres, held all
+85 expenses that were in the database at backup time.
 On the host they are in `$EXPENSE_TRACKER_DATA/k3d-storage/pvc-*_expense-tracker_backups/`.
 
 ```sh
