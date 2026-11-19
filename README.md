@@ -173,3 +173,7 @@ Agent tests run on a scripted model: they check tools, memory, limits and retrie
 real model understands «фо 60к» — that is [the eval's](#measured) job. Every
 variable, parameter and return value is typed: ty and `mypy --strict` check the code,
 `tests/test_annotations.py` checks that variables are annotated.
+
+## License
+
+Apache 2.0, see `LICENSE`.

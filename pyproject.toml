@@ -3,6 +3,7 @@ name = "expense-tracker"
 version = "0.1.0"
 description = "Family expense tracker: a Telegram bot with a LangChain agent and a LangGraph posting flow"
 readme = "README.md"
+license = "Apache-2.0"
 requires-python = ">=3.14,<3.15"
 dependencies = [
     "aiogram>=3.31.0",
